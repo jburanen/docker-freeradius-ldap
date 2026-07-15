@@ -19,8 +19,11 @@ yet.
 
 ## Architecture
 
-- `freeradius` service: official `freeradius/freeradius-server:3.2.7` image,
-  UDP 1812/1813, logs to stdout (`radiusd -f -l stdout`).
+- `freeradius` service: official `freeradius/freeradius-server:3.2.7-alpine`
+  image, UDP 1812/1813, logs to stdout (`radiusd -f -l stdout`). Alpine
+  variant is required: its libldap links OpenSSL like FreeRADIUS itself,
+  while the Ubuntu image mixes GnuTLS/OpenSSL (rlm_ldap warns of TLS
+  instability/crashes).
 - Mounted config (repo `freeradius/raddb/` → container `/etc/raddb/`):
   - `clients.conf` — NAS clients, `$ENV`-driven
   - `mods-enabled/ldap` — rlm_ldap; user+group lookup, bind-as-user auth;

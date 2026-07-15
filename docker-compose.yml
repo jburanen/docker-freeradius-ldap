@@ -1,6 +1,8 @@
 services:
   freeradius:
-    image: freeradius/freeradius-server:3.2.7
+    # Alpine variant: libldap is built against OpenSSL, matching FreeRADIUS —
+    # the Ubuntu-based image mixes GnuTLS/OpenSSL and warns of possible crashes.
+    image: freeradius/freeradius-server:3.2.7-alpine
     container_name: freeradius
     command: ["radiusd", "-f", "-l", "stdout"]
     env_file: .env
