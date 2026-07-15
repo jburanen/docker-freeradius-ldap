@@ -382,6 +382,18 @@ def pending_changes(rules):
     return load_state().get("applied_hash") != rendered_hash(rules)
 
 
+def flash_vendor_reminders(rule):
+    """Post-save hints for attributes that need matching device-side config."""
+    if any(a["attr"].startswith("CP-Gaia") for a in rule["attributes"]):
+        flash(
+            "Check Point Gaia: this rule only works once the matching RBA "
+            "role exists on each Gaia device. Run there: "
+            f"add rba role radius-group-{rule['ldap_group']} "
+            "domain-type System all-features",
+            "info",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -434,6 +446,7 @@ def rule_new():
             rules.append(rule)
             save_rules(rules)
             flash(f"Rule '{rule['name']}' saved. Apply to activate it.", "ok")
+            flash_vendor_reminders(rule)
             return redirect(url_for("index"))
     return render_template("edit.html", rule=None, presets=PRESETS)
 
@@ -455,6 +468,7 @@ def rule_edit(rule_id):
             rules[rules.index(existing)] = rule
             save_rules(rules)
             flash(f"Rule '{rule['name']}' updated. Apply to activate the change.", "ok")
+            flash_vendor_reminders(rule)
             return redirect(url_for("index"))
     return render_template("edit.html", rule=existing, presets=PRESETS)
 
