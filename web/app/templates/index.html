@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div class="row" style="align-items:center;">
+    <div><h2 style="margin:0;">Attribute rules</h2></div>
+    <div style="flex:0;">
+      <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
+    </div>
+  </div>
+  <p class="muted">Each rule sends RADIUS reply attributes to users who are
+  members of an LDAP/AD group (optionally limited to one NAS IP). Saving a
+  rule does not change the running server &mdash; press <strong>Apply</strong>
+  below.</p>
+
+  {% if rules %}
+  <table>
+    <tr><th>Rule</th><th>LDAP group</th><th>NAS IP</th><th>Attributes</th><th>Status</th><th></th></tr>
+    {% for r in rules %}
+    <tr>
+      <td><a href="{{ url_for('rule_edit', rule_id=r.id) }}">{{ r.name }}</a></td>
+      <td>{{ r.ldap_group }}</td>
+      <td>{{ r.nas_ip or "any" }}</td>
+      <td>
+        {% for a in r.attributes %}
+        <code>{{ a.attr }} {{ a.op }} {{ a.value }}</code>{% if not loop.last %}<br>{% endif %}
+        {% endfor %}
+      </td>
+      <td>
+        {% if r.get('enabled', True) %}<span class="badge applied">enabled</span>
+        {% else %}<span class="badge off">disabled</span>{% endif %}
+      </td>
+      <td style="white-space:nowrap;">
+        <form class="inline" method="post" action="{{ url_for('rule_toggle', rule_id=r.id) }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn small" type="submit">{{ 'Disable' if r.get('enabled', True) else 'Enable' }}</button>
+        </form>
+        <form class="inline" method="post" action="{{ url_for('rule_delete', rule_id=r.id) }}"
+              onsubmit="return confirm('Delete rule {{ r.name }}?');">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn small danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No rules yet. Create one to send vendor attributes (Cisco,
+  Check Point Gaia, Brocade ICX presets available).</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="row" style="align-items:center;">
+    <div>
+      <h2 style="margin:0;">Apply to FreeRADIUS
+        {% if pending %}<span class="badge pending">pending changes</span>
+        {% else %}<span class="badge applied">in sync</span>{% endif %}
+      </h2>
+    </div>
+    <div style="flex:0;">
+      <form method="post" action="{{ url_for('apply') }}">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn primary" type="submit">Apply &amp; reload</button>
+      </form>
+    </div>
+  </div>
+  {% if state.applied_at %}
+  <p class="muted">Last applied {{ state.applied_at }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
+  {% endif %}
+  <h2>Generated users file preview</h2>
+  <pre class="preview">{{ preview }}</pre>
+</div>
+
+{% endblock %}

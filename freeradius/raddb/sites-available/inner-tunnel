@@ -44,6 +44,9 @@ server inner-tunnel {
 			}
 		}
 
+		# Reply attributes managed by the radius-admin web UI
+		files
+
 		expiration
 		logintime
 		pap

@@ -14,22 +14,33 @@ services:
       - ./freeradius/raddb/mods-enabled/ldap:/etc/raddb/mods-enabled/ldap:ro
       - ./freeradius/raddb/sites-available/default:/etc/raddb/sites-available/default:ro
       - ./freeradius/raddb/sites-available/inner-tunnel:/etc/raddb/sites-available/inner-tunnel:ro
+      # Shared with radius-admin, which writes the generated 'authorize'
+      # users file here (custom reply attributes per LDAP group).
+      - radius-policy:/opt/etc/raddb/mods-config/files
     restart: unless-stopped
 
-  # Development-only LDAP server with seeded test users.
-  # Start with:  docker compose --profile dev up -d
-  # Not started by default; production deployments point LDAP_SERVER at an
-  # existing Active Directory / LDAP host instead.
-  openldap:
-    profiles: ["dev"]
-    image: osixia/openldap:1.5.0
-    container_name: openldap
-    command: ["--copy-service"]
-    environment:
-      LDAP_ORGANISATION: "Example Org"
-      LDAP_DOMAIN: "example.org"
-      LDAP_ADMIN_PASSWORD: "${DEV_LDAP_ADMIN_PASSWORD:-adminpassword}"
-      LDAP_TLS: "false"
+  # Web admin panel: manages custom RADIUS reply attributes (Cisco /
+  # Check Point Gaia / Brocade ICX presets), authenticates against the same
+  # LDAP as RADIUS, gated by ADMIN_GROUP membership. Built automatically by
+  # 'docker compose up -d' on first run.
+  radius-admin:
+    build: ./web
+    container_name: radius-admin
+    env_file: .env
+    ports:
+      - "0.0.0.0:${ADMIN_PORT:-8080}:8080"
     volumes:
-      - ./dev/ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom:ro
+      - radius-policy:/radius-files
+      - admin-data:/data
+    # Share the freeradius PID namespace so the admin app can SIGHUP radiusd
+    # to reload the users file after changes are applied.
+    pid: "container:freeradius"
+    depends_on:
+      - freeradius
     restart: unless-stopped
+
+volumes:
+  # Generated FreeRADIUS users file, written by radius-admin, read by freeradius
+  radius-policy:
+  # radius-admin rule definitions and apply state
+  admin-data:

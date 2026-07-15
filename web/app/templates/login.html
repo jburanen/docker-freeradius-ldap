@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:24rem; margin:4rem auto;">
+  <h2>Sign in</h2>
+  <p class="muted">Use your directory (LDAP/AD) credentials.</p>
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" autofocus autocomplete="username">
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password">
+    <div style="margin-top:1rem;">
+      <button class="btn primary" type="submit">Sign in</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

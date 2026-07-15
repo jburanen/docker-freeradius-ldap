@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>{{ 'Edit rule' if rule else 'New rule' }}</h2>
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+    <div class="row">
+      <div>
+        <label for="name">Rule name</label>
+        <input type="text" id="name" name="name" value="{{ rule.name if rule else '' }}"
+               placeholder="e.g. Network admins on Cisco">
+      </div>
+      <div>
+        <label for="ldap_group">LDAP/AD group (cn)</label>
+        <input type="text" id="ldap_group" name="ldap_group" value="{{ rule.ldap_group if rule else '' }}"
+               placeholder="e.g. netadmins">
+      </div>
+      <div>
+        <label for="nas_ip">NAS IP (optional, exact match)</label>
+        <input type="text" id="nas_ip" name="nas_ip" value="{{ rule.nas_ip if rule else '' }}"
+               placeholder="empty = all devices">
+      </div>
+    </div>
+
+    <label style="margin-top:1rem;">
+      <input type="checkbox" name="enabled" {% if not rule or rule.get('enabled', True) %}checked{% endif %}>
+      Enabled
+    </label>
+
+    <h2 style="margin-top:1.2rem;">Reply attributes</h2>
+    <div class="row" style="margin-bottom:.5rem;">
+      <div>
+        <select id="preset">
+          <option value="">Insert a vendor preset&hellip;</option>
+          {% for key, p in presets.items() %}
+          <option value="{{ key }}">{{ p.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="flex:0;">
+        <button class="btn" type="button" onclick="insertPreset()">Insert</button>
+      </div>
+    </div>
+
+    <table class="attr-table" id="attrs">
+      <tr><th style="width:40%">Attribute</th><th style="width:12%">Op</th><th>Value</th><th></th></tr>
+      {% set attrs = rule.attributes if rule else [] %}
+      {% for a in attrs %}
+      <tr>
+        <td><input type="text" name="attr" value="{{ a.attr }}"></td>
+        <td><select name="op">
+          {% for op in ['=', ':=', '+='] %}
+          <option value="{{ op }}" {% if a.op == op %}selected{% endif %}>{{ op }}</option>
+          {% endfor %}
+        </select></td>
+        <td><input type="text" name="value" value="{{ a.value }}"></td>
+        <td><button class="btn small danger" type="button" onclick="this.closest('tr').remove()">&times;</button></td>
+      </tr>
+      {% endfor %}
+    </table>
+    <button class="btn small" type="button" onclick="addRow()">+ Add attribute</button>
+
+    <div style="margin-top:1.4rem;">
+      <button class="btn primary" type="submit">Save rule</button>
+      <a class="btn" href="{{ url_for('index') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+const PRESETS = {{ presets | tojson }};
+
+function addRow(attr, op, value) {
+  const table = document.getElementById('attrs');
+  const row = table.insertRow(-1);
+  row.innerHTML =
+    '<td><input type="text" name="attr"></td>' +
+    '<td><select name="op"><option>=</option><option>:=</option><option>+=</option></select></td>' +
+    '<td><input type="text" name="value"></td>' +
+    '<td><button class="btn small danger" type="button" onclick="this.closest(\'tr\').remove()">&times;</button></td>';
+  if (attr !== undefined) {
+    row.querySelector('input[name=attr]').value = attr;
+    row.querySelector('select[name=op]').value = op;
+    row.querySelector('input[name=value]').value = value;
+  }
+}
+
+function insertPreset() {
+  const key = document.getElementById('preset').value;
+  if (!key) return;
+  for (const [attr, op, value] of PRESETS[key].attributes) {
+    addRow(attr, op, value);
+  }
+}
+
+// start with one empty row on a fresh form
+if (document.querySelectorAll('#attrs tr').length === 1) addRow();
+</script>
+
+{% endblock %}

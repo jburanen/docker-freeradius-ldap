@@ -13,6 +13,29 @@ rejected.
 **Rejected alternatives:** ...
 ```
 
+## 2026-07-15 — Custom attributes via rlm_files users file + SIGHUP
+**Decided:** The admin panel renders attribute rules (LDAP group → reply
+attributes) into a FreeRADIUS users file on a shared named volume
+(`radius-policy`); Apply sends SIGHUP to radiusd through a shared PID
+namespace (`pid: "container:freeradius"`). rlm_files HUP reload is
+transactional — parse failure keeps old rules.
+**Why:** Uses only stock FreeRADIUS mechanisms (files module is enabled by
+default), no SQL backend, no docker.sock exposure, no custom freeradius image.
+**Rejected alternatives:** SQL module + DB (heavy, new service);
+mounting docker.sock into web container to restart freeradius (security);
+rest_module (needs FreeRADIUS 4 features / more moving parts).
+
+## 2026-07-15 — Admin panel is compose-built Flask (exception to no-build)
+**Decided:** `web/` is a small Flask+ldap3+waitress app on python:3.12-alpine,
+built automatically by `docker compose up -d` (`build: ./web`). The
+"no build" hard constraint is narrowed to: no *manual* build steps, and the
+freeradius service itself stays on the unmodified official image.
+**Why:** LDAP client + web framework need dependencies; pip-install-at-startup
+is fragile (network dependency on every recreate, unpinned drift).
+**Rejected alternatives:** stdlib-only Python (would mean hand-writing an
+LDAP BER client); pip at container startup; publishing a prebuilt image
+(possible later; adds registry/release overhead now).
+
 ## 2026-07-15 — No-build deployment via $ENV{} config expansion
 **Decided:** Use the official `freeradius/freeradius-server:3.2.7` image with
 project raddb files bind-mounted over the stock ones. All site-specific values
@@ -31,10 +54,11 @@ password (dev OpenLDAP), not plain AD.
 deferred to roadmap; it needs a domain join, which breaks the
 zero-configuration compose story.
 
-## 2026-07-15 — Dev LDAP behind a compose profile
-**Decided:** `osixia/openldap:1.5.0` seeded with test users, started only via
-`docker compose --profile dev up -d`.
-**Why:** Default `up -d` should run exactly the production shape (external
-directory); the dev directory is opt-in.
-**Rejected alternatives:** Bitnami OpenLDAP (image distribution moved to
-bitnamilegacy in 2025, uncertain availability); always-on dev LDAP service.
+## 2026-07-15 — Dev LDAP container removed (supersedes earlier decision)
+**Decided:** Dropped the bundled dev OpenLDAP (`--profile dev`, osixia image,
+seed LDIF) entirely, same day it was added. All testing happens against a
+real LDAP/AD directory.
+**Why:** Jason asked to remove it — testing is done against real
+infrastructure, and the extra container/profile/seed data was dead weight.
+**Note:** RADIUS_REQUIRED_GROUP / ADMIN_GROUP defaults in .env.example
+(`radius-users` / `radius-admins`) are now just suggested group names.

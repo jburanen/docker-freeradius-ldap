@@ -10,3 +10,4 @@
 .gitattributes text eol=lf
 .claudeignore text eol=lf
 freeradius/** text eol=lf
+web/** text eol=lf

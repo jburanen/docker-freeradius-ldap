@@ -1,14 +1,16 @@
 # docker-freeradius-ldap
 
 Docker-deployed FreeRADIUS server with an LDAP / Active Directory user
-database backend. A web front end for configuration is planned but not built
-yet.
+database backend, plus a web admin panel (`radius-admin`) for managing
+custom RADIUS reply attributes.
 
 ## Hard constraints
 
-- **No build step.** `docker compose up -d` must be the entire deployment.
-  Official upstream images only; project config is bind-mounted over the
-  image's stock raddb. Do not introduce Dockerfiles for the core stack.
+- **`docker compose up -d` must be the entire deployment.** The freeradius
+  service stays on the unmodified official image with config bind-mounted —
+  never add a Dockerfile for it. The web panel is the one exception: compose
+  builds `web/Dockerfile` automatically on first `up`; no manual build
+  commands may ever be required.
 - **All site-specific config comes from `.env`.** FreeRADIUS configs use
   native `$ENV{VAR}` expansion (parsed at startup). Never hardcode
   credentials, hosts, or filters in raddb files; add a variable to
@@ -33,18 +35,29 @@ yet.
     sites-available is sufficient). PAP → `Auth-Type ldap` (bind-as-user);
     EAP handled via inner-tunnel; optional group gate via
     `RADIUS_REQUIRED_GROUP` (empty = allow all directory users).
-- `openldap` service behind compose profile `dev`: osixia/openldap:1.5.0
-  seeded from `dev/ldif/01-seed.ldif` (testuser/testpassword in
-  `radius-users`; nogroup/nogrouppass in no group). Production points
-  `LDAP_SERVER` at a real directory instead.
+- `radius-admin` service (`web/`): Flask + ldap3 + waitress on python alpine,
+  built by compose. Manages "attribute rules" (LDAP group [+ optional NAS
+  IP] → RADIUS reply attributes) stored in the `admin-data` volume as
+  rules.json, rendered as a FreeRADIUS users file into the `radius-policy`
+  volume, which freeradius mounts at `/opt/etc/raddb/mods-config/files`
+  (read by the stock `files` module; both sites call `files` in authorize).
+  Apply = rewrite file + SIGHUP radiusd via shared PID namespace
+  (`pid: "container:freeradius"`). Login = LDAP bind-as-user with the same
+  `LDAP_*` env vars, gated by `ADMIN_GROUP` membership (memberOf first, then
+  member/uniqueMember/memberUid group search). Vendor presets: Cisco
+  (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
+  CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
+  dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x
+  share/dictionary on GitHub).
 
 ## Gotchas / domain notes
 
 - **AD + MSCHAPv2 (PEAP) does not work** via plain LDAP — AD never exposes
   password hashes. PAP/EAP-TTLS-PAP (bind-as-user) is the supported AD path;
   MSCHAPv2 against AD would require Samba/winbind + ntlm_auth (roadmap).
-- The ldap module's `update` section caches `userPassword` when readable
-  (dev OpenLDAP), which is what makes CHAP/MSCHAP work in dev only.
+- The ldap module's `update` section caches `userPassword` when the bind
+  account can read it — that's what makes CHAP/MSCHAP possible on
+  directories that expose passwords (never AD).
 - `$ENV{...}` is expanded when the config file is parsed. Unlang conditions
   can't reliably contain `$ENV`, so env values used in conditions are first
   copied into `&control:Tmp-String-9` via `update` (see the group check in
@@ -60,30 +73,42 @@ yet.
   for multi-DC Active Directory.
 - Compose fails fast if `.env` is missing (`env_file` is required) — that's
   intentional, it forces `cp .env.example .env`.
+- SIGHUP reload of rlm_files is transactional: a users file that fails to
+  parse leaves the previously loaded rules active, so a bad Apply can't take
+  auth down. radius-admin overwrites the generated `authorize` on its own
+  startup (from rules.json) but only HUPs on explicit Apply.
+- If the freeradius container is recreated, radius-admin must be recreated
+  too (its PID namespace ref breaks); `docker compose up -d` handles this
+  via depends_on.
+- The `radius-policy` named volume prepopulates from the image's stock
+  mods-config/files on first create — freeradius must be created before
+  radius-admin (depends_on guarantees it), or rlm_files would see an empty
+  dir and fail.
 
 ## Commands
 
 ```sh
-docker compose --profile dev up -d      # stack + throwaway dev LDAP
-docker compose up -d                    # production (external directory)
+docker compose up -d                    # deploy / apply compose changes
 docker compose logs -f freeradius
-docker compose exec freeradius radtest testuser testpassword localhost 0 testing123
+docker compose logs -f radius-admin
+docker compose exec freeradius radtest <user> <pass> localhost 0 <secret>
 docker compose run --rm freeradius radiusd -X    # debug mode (stop the service first)
 docker compose up -d --force-recreate freeradius # apply .env changes
+docker compose up -d --build radius-admin        # after changing web/
 ```
 
 ## Testing changes
 
-There is no test suite; verification is behavioral. After any raddb change:
-`radiusd -XC` inside the container checks config syntax
-(`docker compose run --rm freeradius radiusd -XC`), then run the radtest
-matrix against the dev profile: testuser accepts, wrong password rejects,
-and with `RADIUS_REQUIRED_GROUP=radius-users` the `nogroup` user rejects.
+There is no test suite; verification is behavioral, against a real
+LDAP/AD directory (there is no bundled dev directory — removed 2026-07-15).
+After any raddb change: `radiusd -XC` inside the container checks config
+syntax (`docker compose run --rm freeradius radiusd -XC`), then radtest a
+known directory account: valid password accepts, wrong password rejects,
+and with `RADIUS_REQUIRED_GROUP` set a non-member rejects.
 
-> Note (2026-07-15): the dev machine this repo was scaffolded on had no
-> Docker/WSL, so the initial config has been reviewed but not yet executed.
-> First person to run it: expect possible small unlang/module-name fixes;
-> use `radiusd -XC` output to iterate.
+> Note (2026-07-15): the Windows machine this repo is developed on has no
+> Docker/WSL; changes ship reviewed but unexecuted and are verified on the
+> deployment host. Expect to iterate from `radiusd -XC` / container logs.
 
 ## Conventions
 
@@ -96,7 +121,6 @@ and with `RADIUS_REQUIRED_GROUP=radius-users` the `nogroup` user rejects.
 
 ## Roadmap (agreed)
 
-- Web front end container for RADIUS client/policy management (mechanism for
-  handing config to FreeRADIUS still undecided)
 - ntlm_auth/winbind option for PEAP-MSCHAPv2 against AD
 - EAP TLS certificate management (currently image snakeoil certs)
+- Manage NAS clients and the RADIUS_REQUIRED_GROUP gate from the admin panel

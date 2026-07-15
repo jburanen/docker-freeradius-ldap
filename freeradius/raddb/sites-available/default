@@ -55,6 +55,11 @@ server default {
 			}
 		}
 
+		# Group/vendor reply attributes managed by the radius-admin web
+		# UI. rlm_files reads mods-config/files/authorize; a HUP reloads
+		# it (and keeps the old rules if the new file fails to parse).
+		files
+
 		expiration
 		logintime
 		pap

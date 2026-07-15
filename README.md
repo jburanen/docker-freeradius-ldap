@@ -1,33 +1,53 @@
 # docker-freeradius-ldap
 
 A Docker-deployed [FreeRADIUS](https://freeradius.org/) server backed by an
-LDAP or Active Directory user database. No image builds required — `docker
-compose up -d` runs the official FreeRADIUS image with configuration driven
-entirely by environment variables in `.env`.
-
-A web front end for day-to-day configuration is planned; today all settings
-live in `.env`.
+LDAP or Active Directory user database, with a web admin panel for managing
+custom RADIUS reply attributes (Cisco IOS, Check Point Gaia, Brocade ICX
+presets included). `docker compose up -d` is the entire deployment — the
+FreeRADIUS service runs the unmodified official image configured through
+`.env`, and Compose builds the small admin panel image automatically on
+first run.
 
 ## Quick start
 
 ```sh
-cp .env.example .env        # then edit .env for your environment
-
-# Option A: test drive with the bundled dev LDAP (seeded test users)
-docker compose --profile dev up -d
-
-# Option B: production — point .env at your AD/LDAP server
+cp .env.example .env        # point it at your AD/LDAP and set secrets
 docker compose up -d
 ```
 
-Test authentication (dev profile defaults):
+Test authentication with a directory account:
 
 ```sh
-docker compose exec freeradius radtest testuser testpassword localhost 0 testing123
+docker compose exec freeradius radtest <username> <password> localhost 0 <RADIUS_CLIENT_SECRET>
 ```
 
 Expect `Access-Accept`. From another machine, point `radtest`/your NAS at UDP
 1812 with the shared secret from `RADIUS_CLIENT_SECRET`.
+
+Then open the admin panel at `http://<host>:8080` (port from `ADMIN_PORT`)
+and log in with directory credentials — access requires membership in the
+group named by `ADMIN_GROUP`.
+
+## Admin panel
+
+The `radius-admin` service manages **attribute rules**: each rule maps an
+LDAP/AD group (optionally restricted to a single NAS IP) to a list of RADIUS
+reply attributes. Typical use: members of `netadmins` get
+`Cisco-AVPair = "shell:priv-lvl=15"` on Cisco switches, `CP-Gaia-User-Role =
+adminRole` on Check Point Gaia, `Foundry-Privilege-Level = 0` on Brocade ICX —
+all available as one-click presets, plus free-form attributes from any
+dictionary FreeRADIUS loads.
+
+- **Login** uses the same `LDAP_*` settings as RADIUS auth (bind-as-user).
+  Access requires membership in the group named by `ADMIN_GROUP`.
+- **Apply & reload** renders the rules into a FreeRADIUS `users` file on a
+  shared volume and sends radiusd a SIGHUP. The reload is transactional: if
+  the new file fails to parse, FreeRADIUS keeps the previous rules.
+- Saving a rule never touches the running server until you press Apply; the
+  dashboard shows a "pending changes" badge and a live preview of the
+  generated file.
+- The panel speaks plain HTTP; put a TLS reverse proxy in front of it for
+  production.
 
 ## How it works
 
@@ -41,10 +61,6 @@ Expect `Access-Accept`. From another machine, point `radtest`/your NAS at UDP
   Directory, which never exposes password hashes.
 - **Groups**: set `RADIUS_REQUIRED_GROUP` in `.env` to restrict access to
   members of one LDAP/AD group; leave it empty to allow any directory user.
-- **openldap** (started only with `--profile dev`) is a throwaway directory
-  seeded from [dev/ldif/01-seed.ldif](dev/ldif/01-seed.ldif) with two test
-  accounts: `testuser`/`testpassword` (member of `radius-users`) and
-  `nogroup`/`nogrouppass` (no groups).
 
 ## Configuration
 
@@ -54,8 +70,10 @@ filter with `sAMAccountName`, `memberOf` group membership).
 
 | Area | Variables |
 |------|-----------|
+| Ports | `RADIUS_AUTH_PORT`, `RADIUS_ACCT_PORT`, `ADMIN_PORT` |
 | RADIUS clients | `RADIUS_CLIENT_IP`, `RADIUS_CLIENT_SECRET` |
 | Access policy | `RADIUS_REQUIRED_GROUP` |
+| Admin panel | `ADMIN_GROUP`, `ADMIN_SESSION_SECRET` |
 | Directory connection | `LDAP_SERVER`, `LDAP_START_TLS`, `LDAP_TLS_REQUIRE_CERT`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_BASE_DN` |
 | User lookup | `LDAP_USER_BASE_DN`, `LDAP_USER_OBJECT_FILTER`, `LDAP_USER_NAME_ATTRIBUTE` |
 | Group lookup | `LDAP_GROUP_BASE_DN`, `LDAP_GROUP_OBJECT_FILTER`, `LDAP_GROUP_MEMBERSHIP_FILTER`, `LDAP_GROUP_MEMBERSHIP_ATTRIBUTE` |
@@ -67,7 +85,7 @@ After changing `.env`, apply with `docker compose up -d --force-recreate freerad
 | Method | Works against | Notes |
 |--------|--------------|-------|
 | PAP (incl. EAP-TTLS/PAP) | AD and any LDAP | Bind-as-user; recommended for AD |
-| CHAP / MSCHAPv2 (incl. PEAP) | Directories that expose a readable password | Works with the dev OpenLDAP; **not** plain AD — AD needs Samba/winbind + `ntlm_auth` (not included yet) |
+| CHAP / MSCHAPv2 (incl. PEAP) | Directories that expose a readable password | **Not** plain AD — AD needs Samba/winbind + `ntlm_auth` (not included yet) |
 
 ## Troubleshooting
 
@@ -80,14 +98,14 @@ docker compose run --rm freeradius radiusd -X   # full debug mode, foreground
 ## Repository layout
 
 ```
-docker-compose.yml            # the whole stack; dev LDAP behind --profile dev
+docker-compose.yml            # the whole stack
 .env.example                  # all settings, documented (copy to .env)
 freeradius/raddb/             # config mounted over the image defaults
   clients.conf                #   NAS clients ($ENV-driven)
   mods-enabled/ldap           #   LDAP module ($ENV-driven)
   sites-available/default     #   outer virtual server
   sites-available/inner-tunnel#   EAP inner tunnel
-dev/ldif/                     # seed data for the dev LDAP
+web/                          # radius-admin panel (Flask; compose builds it)
 CLAUDE.md                     # project context for AI-assisted development
 ```
 
@@ -101,9 +119,9 @@ CLAUDE.md                     # project context for AI-assisted development
 
 ## Roadmap
 
-- Web front end for RADIUS client/policy management
 - `ntlm_auth` option for PEAP/MSCHAPv2 against Active Directory
 - TLS certificate management for EAP
+- Manage NAS clients and the group gate from the admin panel
 
 ## License
 

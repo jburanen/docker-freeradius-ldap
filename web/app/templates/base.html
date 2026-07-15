@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RADIUS Admin</title>
+<style>
+:root { --bg:#f5f6f8; --card:#fff; --ink:#1a222c; --muted:#5c6773; --line:#dde2e8;
+        --accent:#1f6feb; --ok:#1a7f37; --err:#b42318; }
+* { box-sizing:border-box; }
+body { margin:0; font:15px/1.5 system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+header { background:#101826; color:#fff; padding:.7rem 1.2rem; display:flex; align-items:center; gap:1rem; }
+header h1 { font-size:1.05rem; margin:0; font-weight:600; }
+header .spacer { flex:1; }
+header .user { color:#9fb0c3; font-size:.85rem; }
+main { max-width: 62rem; margin:1.5rem auto; padding:0 1rem; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:1.1rem 1.3rem; margin-bottom:1.2rem; }
+h2 { font-size:1rem; margin:.1rem 0 .8rem; }
+table { border-collapse:collapse; width:100%; }
+th, td { text-align:left; padding:.45rem .6rem; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; letter-spacing:.03em; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.btn { display:inline-block; border:1px solid var(--line); border-radius:6px; background:#fff;
+       padding:.35rem .8rem; font:inherit; font-size:.88rem; cursor:pointer; color:var(--ink); }
+.btn:hover { border-color:#b9c2cc; }
+.btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.btn.danger { color:var(--err); }
+.btn.small { padding:.15rem .55rem; font-size:.8rem; }
+form.inline { display:inline; }
+.flash { border-radius:6px; padding:.55rem .9rem; margin-bottom:.9rem; font-size:.9rem; }
+.flash.ok { background:#e7f5ec; color:var(--ok); border:1px solid #b5dfc3; }
+.flash.error { background:#fdebe9; color:var(--err); border:1px solid #f2c2bc; }
+.badge { display:inline-block; border-radius:99px; padding:.05rem .6rem; font-size:.75rem; font-weight:600; }
+.badge.pending { background:#fff3d6; color:#8a6100; border:1px solid #eed49a; }
+.badge.applied { background:#e7f5ec; color:var(--ok); border:1px solid #b5dfc3; }
+.badge.off { background:#eef0f3; color:var(--muted); border:1px solid var(--line); }
+pre.preview { background:#101826; color:#d7e2ee; border-radius:8px; padding:1rem; overflow-x:auto; font-size:.83rem; }
+label { display:block; font-size:.85rem; color:var(--muted); margin:.7rem 0 .2rem; }
+input[type=text], input[type=password], select {
+  width:100%; padding:.42rem .6rem; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+.attr-table input, .attr-table select { width:100%; }
+.attr-table td { border-bottom:none; padding:.2rem .3rem; }
+.muted { color:var(--muted); font-size:.85rem; }
+.row { display:flex; gap:1rem; align-items:end; flex-wrap:wrap; }
+.row > div { flex:1; min-width:12rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RADIUS Admin</h1>
+  <div class="spacer"></div>
+  {% if session.user %}
+  <span class="user">{{ session.user }}</span>
+  <form class="inline" method="post" action="{{ url_for('logout') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <button class="btn small" type="submit">Log out</button>
+  </form>
+  {% endif %}
+</header>
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -13,9 +13,9 @@ ldap {
 
 	update {
 		# If the directory allows the bind account to read the user's
-		# password (e.g. dev OpenLDAP), cache it so CHAP/MSCHAP can work.
-		# Active Directory never exposes passwords; AD authentication
-		# happens via LDAP bind (Auth-Type ldap) instead.
+		# password, cache it so CHAP/MSCHAP can work. Active Directory
+		# never exposes passwords; AD authentication happens via LDAP
+		# bind (Auth-Type ldap) instead.
 		control:Password-With-Header	+= 'userPassword'
 	}
 
