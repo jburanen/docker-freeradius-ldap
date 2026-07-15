@@ -7,8 +7,8 @@ services:
     command: ["radiusd", "-f", "-l", "stdout"]
     env_file: .env
     ports:
-      - "1812:1812/udp"
-      - "1813:1813/udp"
+      - "0.0.0.0:${RADIUS_AUTH_PORT:-1812}:1812/udp"
+      - "0.0.0.0:${RADIUS_ACCT_PORT:-1813}:1813/udp"
     volumes:
       - ./freeradius/raddb/clients.conf:/etc/raddb/clients.conf:ro
       - ./freeradius/raddb/mods-enabled/ldap:/etc/raddb/mods-enabled/ldap:ro
