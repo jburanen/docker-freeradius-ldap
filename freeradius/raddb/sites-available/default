@@ -1,0 +1,110 @@
+# Default virtual server: RADIUS auth + accounting backed by LDAP/AD.
+# Replaces the stock site; kept deliberately minimal. Users are looked up in
+# LDAP, PAP requests are authenticated by binding to the directory as the
+# user, and EAP is handled by the inner-tunnel virtual server.
+
+server default {
+	listen {
+		type = auth
+		ipaddr = *
+		port = 0
+	}
+
+	listen {
+		type = acct
+		ipaddr = *
+		port = 0
+	}
+
+	authorize {
+		filter_username
+		preprocess
+		chap
+		mschap
+		suffix
+
+		eap {
+			ok = return
+		}
+
+		ldap
+
+		# Bind-as-user authentication for plaintext (PAP) requests.
+		# This is the path Active Directory uses.
+		if ((ok || updated) && &User-Password && !&control:Auth-Type) {
+			update control {
+				&Auth-Type := ldap
+			}
+		}
+
+		# Optional group restriction, driven by RADIUS_REQUIRED_GROUP.
+		# When the variable is empty this block is a no-op.
+		update control {
+			&Tmp-String-9 := "$ENV{RADIUS_REQUIRED_GROUP}"
+		}
+		if (&control:Tmp-String-9 != "") {
+			if (!(&Ldap-Group == "%{control:Tmp-String-9}")) {
+				update reply {
+					&Reply-Message := "Not a member of the required group"
+				}
+				reject
+			}
+		}
+
+		expiration
+		logintime
+		pap
+	}
+
+	authenticate {
+		Auth-Type PAP {
+			pap
+		}
+		Auth-Type CHAP {
+			chap
+		}
+		Auth-Type MS-CHAP {
+			mschap
+		}
+		Auth-Type LDAP {
+			ldap
+		}
+		eap
+	}
+
+	preacct {
+		preprocess
+		acct_unique
+		suffix
+	}
+
+	accounting {
+		detail
+		exec
+		attr_filter.accounting_response
+	}
+
+	session {
+	}
+
+	post-auth {
+		update {
+			&reply: += &session-state:
+		}
+		exec
+		remove_reply_message_if_eap
+
+		Post-Auth-Type REJECT {
+			attr_filter.access_reject
+			eap
+			remove_reply_message_if_eap
+		}
+	}
+
+	pre-proxy {
+	}
+
+	post-proxy {
+		eap
+	}
+}

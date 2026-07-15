@@ -1,0 +1,85 @@
+# Inner-tunnel virtual server: handles the request inside EAP tunnels
+# (PEAP, EAP-TTLS). Mirrors the default site's LDAP logic.
+#
+# Note for Active Directory: PEAP/MSCHAPv2 cannot work against plain AD LDAP
+# because AD never exposes password hashes to LDAP clients. Use EAP-TTLS/PAP
+# (bind-as-user), or add Samba/winbind + ntlm_auth for MSCHAPv2.
+
+server inner-tunnel {
+	listen {
+		type = auth
+		ipaddr = 127.0.0.1
+		port = 18120
+	}
+
+	authorize {
+		filter_username
+		chap
+		mschap
+		suffix
+
+		eap {
+			ok = return
+		}
+
+		ldap
+
+		if ((ok || updated) && &User-Password && !&control:Auth-Type) {
+			update control {
+				&Auth-Type := ldap
+			}
+		}
+
+		# Optional group restriction (same as outer server).
+		update control {
+			&Tmp-String-9 := "$ENV{RADIUS_REQUIRED_GROUP}"
+		}
+		if (&control:Tmp-String-9 != "") {
+			if (!(&Ldap-Group == "%{control:Tmp-String-9}")) {
+				update reply {
+					&Reply-Message := "Not a member of the required group"
+				}
+				reject
+			}
+		}
+
+		expiration
+		logintime
+		pap
+	}
+
+	authenticate {
+		Auth-Type PAP {
+			pap
+		}
+		Auth-Type CHAP {
+			chap
+		}
+		Auth-Type MS-CHAP {
+			mschap
+		}
+		Auth-Type LDAP {
+			ldap
+		}
+		eap
+	}
+
+	session {
+	}
+
+	post-auth {
+		Post-Auth-Type REJECT {
+			attr_filter.access_reject
+			update outer.session-state {
+				&Module-Failure-Message := &request:Module-Failure-Message
+			}
+		}
+	}
+
+	pre-proxy {
+	}
+
+	post-proxy {
+		eap
+	}
+}

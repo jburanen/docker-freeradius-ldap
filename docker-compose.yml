@@ -1,0 +1,33 @@
+services:
+  freeradius:
+    image: freeradius/freeradius-server:3.2.7
+    container_name: freeradius
+    command: ["radiusd", "-f", "-l", "stdout"]
+    env_file: .env
+    ports:
+      - "1812:1812/udp"
+      - "1813:1813/udp"
+    volumes:
+      - ./freeradius/raddb/clients.conf:/etc/raddb/clients.conf:ro
+      - ./freeradius/raddb/mods-enabled/ldap:/etc/raddb/mods-enabled/ldap:ro
+      - ./freeradius/raddb/sites-available/default:/etc/raddb/sites-available/default:ro
+      - ./freeradius/raddb/sites-available/inner-tunnel:/etc/raddb/sites-available/inner-tunnel:ro
+    restart: unless-stopped
+
+  # Development-only LDAP server with seeded test users.
+  # Start with:  docker compose --profile dev up -d
+  # Not started by default; production deployments point LDAP_SERVER at an
+  # existing Active Directory / LDAP host instead.
+  openldap:
+    profiles: ["dev"]
+    image: osixia/openldap:1.5.0
+    container_name: openldap
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: "Example Org"
+      LDAP_DOMAIN: "example.org"
+      LDAP_ADMIN_PASSWORD: "${DEV_LDAP_ADMIN_PASSWORD:-adminpassword}"
+      LDAP_TLS: "false"
+    volumes:
+      - ./dev/ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom:ro
+    restart: unless-stopped

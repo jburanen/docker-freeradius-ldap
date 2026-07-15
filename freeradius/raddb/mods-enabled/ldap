@@ -1,0 +1,65 @@
+# rlm_ldap -- user and group lookups against LDAP / Active Directory.
+# All connection settings come from environment variables (see .env.example);
+# FreeRADIUS expands $ENV{...} when it parses this file at startup.
+
+ldap {
+	server = "$ENV{LDAP_SERVER}"
+	identity = "$ENV{LDAP_BIND_DN}"
+	password = "$ENV{LDAP_BIND_PASSWORD}"
+	base_dn = "$ENV{LDAP_BASE_DN}"
+
+	sasl {
+	}
+
+	update {
+		# If the directory allows the bind account to read the user's
+		# password (e.g. dev OpenLDAP), cache it so CHAP/MSCHAP can work.
+		# Active Directory never exposes passwords; AD authentication
+		# happens via LDAP bind (Auth-Type ldap) instead.
+		control:Password-With-Header	+= 'userPassword'
+	}
+
+	user {
+		base_dn = "$ENV{LDAP_USER_BASE_DN}"
+		filter = "(&$ENV{LDAP_USER_OBJECT_FILTER}($ENV{LDAP_USER_NAME_ATTRIBUTE}=%{%{Stripped-User-Name}:-%{User-Name}}))"
+	}
+
+	group {
+		base_dn = "$ENV{LDAP_GROUP_BASE_DN}"
+		filter = "$ENV{LDAP_GROUP_OBJECT_FILTER}"
+		name_attribute = cn
+		membership_filter = "$ENV{LDAP_GROUP_MEMBERSHIP_FILTER}"
+		membership_attribute = "$ENV{LDAP_GROUP_MEMBERSHIP_ATTRIBUTE}"
+	}
+
+	options {
+		# chase_referrals + rebind are required for multi-DC Active Directory
+		chase_referrals = yes
+		rebind = yes
+		res_timeout = 10
+		srv_timelimit = 3
+		net_timeout = 3
+		idle = 60
+		probes = 3
+		interval = 3
+		ldap_debug = 0x0000
+	}
+
+	tls {
+		start_tls = $ENV{LDAP_START_TLS}
+		require_cert = "$ENV{LDAP_TLS_REQUIRE_CERT}"
+	}
+
+	pool {
+		# start = 0 so the server comes up even if LDAP is briefly
+		# unreachable; connections are opened on demand.
+		start = 0
+		min = 0
+		max = 8
+		spare = 1
+		uses = 0
+		retry_delay = 5
+		lifetime = 0
+		idle_timeout = 60
+	}
+}

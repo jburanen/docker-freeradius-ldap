@@ -1,0 +1,12 @@
+# FreeRADIUS configs, LDIF, and compose files must keep LF endings —
+# CRLF breaks parsing inside the Linux containers.
+* text=auto
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ldif text eol=lf
+*.md text eol=lf
+.env.example text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.claudeignore text eol=lf
+freeradius/** text eol=lf

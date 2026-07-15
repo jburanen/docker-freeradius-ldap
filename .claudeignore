@@ -1,6 +1,7 @@
 # Never read secret material into context
 .env
 .env.*
+!.env.example
 secrets/
 certs/
 *.pem

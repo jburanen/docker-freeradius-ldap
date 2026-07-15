@@ -1,0 +1,30 @@
+# Seed data for the dev-only OpenLDAP container (--profile dev).
+# Two test users: one in the radius-users group, one not, so the
+# RADIUS_REQUIRED_GROUP feature can be exercised.
+
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=testuser,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: testuser
+cn: Test User
+sn: User
+userPassword: testpassword
+
+dn: uid=nogroup,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: nogroup
+cn: No Group
+sn: Group
+userPassword: nogrouppass
+
+dn: cn=radius-users,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: radius-users
+member: uid=testuser,ou=people,dc=example,dc=org
