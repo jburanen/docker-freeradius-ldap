@@ -49,6 +49,11 @@ yet.
   can't reliably contain `$ENV`, so env values used in conditions are first
   copied into `&control:Tmp-String-9` via `update` (see the group check in
   both sites).
+- The startup warning `Please change "%{control:Tmp-String-9}" to
+  &control:Tmp-String-9` in the Ldap-Group condition is a **false positive —
+  do not apply it**. Ldap-Group is a virtual comparison attribute; an
+  &attribute reference on the RHS is a fatal parse error ("Cannot use
+  attribute reference on right side of condition"). Verified 2026-07-15.
 - **Line endings matter**: raddb/LDIF/compose files must stay LF —
   `.gitattributes` enforces this. CRLF breaks parsing inside the containers.
 - `chase_referrals = yes` + `rebind = yes` in the ldap module are required

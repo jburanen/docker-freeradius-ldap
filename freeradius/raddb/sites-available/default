@@ -43,7 +43,11 @@ server default {
 			&Tmp-String-9 := "$ENV{RADIUS_REQUIRED_GROUP}"
 		}
 		if (&control:Tmp-String-9 != "") {
-			if (!(&Ldap-Group == &control:Tmp-String-9)) {
+			# The xlat string is required: Ldap-Group is a virtual
+			# comparison attribute and rejects an &attribute reference
+			# on the right side ("Cannot use attribute reference"),
+			# despite the server's startup warning suggesting one.
+			if (!(&Ldap-Group == "%{control:Tmp-String-9}")) {
 				update reply {
 					&Reply-Message := "Not a member of the required group"
 				}

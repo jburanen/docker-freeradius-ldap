@@ -35,7 +35,8 @@ server inner-tunnel {
 			&Tmp-String-9 := "$ENV{RADIUS_REQUIRED_GROUP}"
 		}
 		if (&control:Tmp-String-9 != "") {
-			if (!(&Ldap-Group == &control:Tmp-String-9)) {
+			# xlat string required here -- see note in sites-available/default
+			if (!(&Ldap-Group == "%{control:Tmp-String-9}")) {
 				update reply {
 					&Reply-Message := "Not a member of the required group"
 				}
