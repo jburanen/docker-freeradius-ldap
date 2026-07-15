@@ -1,0 +1,54 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+*.secret
+secrets/
+
+# TLS certificates and keys
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+certs/
+!**/certs/.gitkeep
+
+# FreeRADIUS runtime artifacts
+*.log
+radacct/
+radutmp
+radwtmp
+
+# Docker
+docker-compose.override.yml
+volumes/
+data/
+
+# Node (web front end)
+node_modules/
+dist/
+build/
+.npm/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.vscode/
+*.code-workspace
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json

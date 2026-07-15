@@ -1,0 +1,19 @@
+# Never read secret material into context
+.env
+.env.*
+secrets/
+certs/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Bulk/runtime data with no code value
+node_modules/
+dist/
+build/
+volumes/
+data/
+radacct/
+*.log
+.git/
