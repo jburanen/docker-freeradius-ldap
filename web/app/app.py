@@ -386,10 +386,13 @@ def flash_vendor_reminders(rule):
     """Post-save hints for attributes that need matching device-side config."""
     if any(a["attr"].startswith("CP-Gaia") for a in rule["attributes"]):
         flash(
-            "Check Point Gaia: this rule only works once the matching RBA "
-            "role exists on each Gaia device. Run there: "
-            f"add rba role radius-group-{rule['ldap_group']} "
-            "domain-type System all-features",
+            {
+                "text": "Check Point Gaia: this rule only works once the "
+                        "matching RBA role exists on each Gaia device. Run "
+                        "this in clish on each device:",
+                "command": f"add rba role radius-group-{rule['ldap_group']} "
+                           "domain-type System all-features",
+            },
             "info",
         )
 

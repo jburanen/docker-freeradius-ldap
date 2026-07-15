@@ -31,7 +31,11 @@ form.inline { display:inline; }
 .flash { border-radius:6px; padding:.55rem .9rem; margin-bottom:.9rem; font-size:.9rem; }
 .flash.ok { background:#e7f5ec; color:var(--ok); border:1px solid #b5dfc3; }
 .flash.error { background:#fdebe9; color:var(--err); border:1px solid #f2c2bc; }
-.flash.info { background:#e8f0fd; color:#1a4d94; border:1px solid #bcd2f2; font-family:ui-monospace, Consolas, monospace; }
+.flash.info { background:#e8f0fd; color:#1a4d94; border:1px solid #bcd2f2; }
+.flash .cmdrow { display:flex; gap:.5rem; align-items:center; margin-top:.45rem; }
+.flash code.cmd { flex:1; background:#101826; color:#d7e2ee; padding:.4rem .7rem;
+                  border-radius:6px; overflow-x:auto; white-space:nowrap;
+                  font-family:ui-monospace, Consolas, monospace; font-size:.85rem; }
 .badge { display:inline-block; border-radius:99px; padding:.05rem .6rem; font-size:.75rem; font-weight:600; }
 .badge.pending { background:#fff3d6; color:#8a6100; border:1px solid #eed49a; }
 .badge.applied { background:#e7f5ec; color:var(--ok); border:1px solid #b5dfc3; }
@@ -62,10 +66,41 @@ input[type=text], input[type=password], select {
 <main>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}
+      {% if message is mapping %}
+      <div class="flash {{ category }}">
+        <div>{{ message.text }}</div>
+        <div class="cmdrow">
+          <code class="cmd">{{ message.command }}</code>
+          <button class="btn small" type="button" onclick="copyCmd(this)">Copy</button>
+        </div>
+      </div>
+      {% else %}
       <div class="flash {{ category }}">{{ message }}</div>
+      {% endif %}
     {% endfor %}
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
+<script>
+function copyCmd(btn) {
+  const text = btn.parentElement.querySelector('code.cmd').textContent;
+  const done = () => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done);
+  } else {
+    // clipboard API needs a secure context; the panel is plain HTTP
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    done();
+  }
+}
+</script>
 </body>
 </html>
