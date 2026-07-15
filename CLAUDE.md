@@ -71,6 +71,11 @@ custom RADIUS reply attributes.
   `.gitattributes` enforces this. CRLF breaks parsing inside the containers.
 - `chase_referrals = yes` + `rebind = yes` in the ldap module are required
   for multi-DC Active Directory.
+- BlastRADIUS (CVE-2024-3596): clients.conf sets
+  `require_message_authenticator` / `limit_proxy_state` from env
+  (`RADIUS_REQUIRE_MESSAGE_AUTHENTICATOR` default yes). Because there is one
+  catch-all client block, "auto" would let a single patched NAS upgrade the
+  requirement for all devices — that's why the default is explicit.
 - Compose fails fast if `.env` is missing (`env_file` is required) — that's
   intentional, it forces `cp .env.example .env`.
 - SIGHUP reload of rlm_files is transactional: a users file that fails to
