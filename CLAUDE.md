@@ -56,7 +56,11 @@ custom RADIUS reply attributes.
   with the panel's own LDAP logins/binds/applies via a root-logger
   FileHandler, `radius-admin:` prefix) from the `radius-logs` volume —
   3 s auto-refresh, clear button, copytruncate rotation at
-  `RADIUS_LOG_MAX_MB` (default 10) each. Vendor presets: Cisco
+  `RADIUS_LOG_MAX_MB` (default 10) each. A login-gated footer shows
+  `ADMIN_VERSION` and the running FreeRADIUS version (probed through the
+  shared PID namespace via the `libfreeradius-server-<ver>.so` filename
+  under `/proc/<pid>/root`, falling back to the log banner; cached per
+  radiusd pid). Vendor presets: Cisco
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
   dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x
@@ -140,6 +144,8 @@ and with `RADIUS_REQUIRED_GROUP` set a non-member rejects.
   policies, dictionaries).
 - Config style follows stock FreeRADIUS 3.2 raddb (tabs, `&attribute`
   references in unlang).
+- Bump `ADMIN_VERSION` in `web/app/app.py` (shown in the footer) whenever
+  the panel's behavior changes.
 - Decision log: `.claude/memory/decisions.md`. Open roadmap: README.
 
 ## Roadmap (agreed)

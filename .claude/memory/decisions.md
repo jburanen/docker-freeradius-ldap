@@ -13,6 +13,20 @@ rejected.
 **Rejected alternatives:** ...
 ```
 
+## 2026-07-16 — Footer FreeRADIUS version probed via /proc/<pid>/root
+**Decided:** The panel footer shows `ADMIN_VERSION` (constant in app.py,
+starts at 1.0.0, bump on panel changes) and the running FreeRADIUS version,
+read through the already-shared PID namespace: same-uid access to
+`/proc/<radiusd pid>/root` lets us glob the versioned
+`libfreeradius-server-<ver>.so` filename (source builds use prefix /opt);
+fallback is the "FreeRADIUS Version x.y.z" banner in the tee'd radius.log.
+Cached per radiusd pid; shows "(version unavailable)" if both fail (LSM
+policy can block /proc/<pid>/root traversal on some hosts). Versions render
+only when logged in — no disclosure on the login page.
+**Rejected alternatives:** hardcoding the compose image tag (lies after an
+image change); passing the tag through .env (version pin belongs in compose,
+not site config); Status-Server query (needs a RADIUS client lib + secret).
+
 ## 2026-07-16 — Admin panel log viewer via fifo + tee onto a shared volume
 **Decided:** radiusd keeps logging to stdout, but the compose command routes
 it through a fifo into `tee -a /logs/radius.log` (named volume `radius-logs`,

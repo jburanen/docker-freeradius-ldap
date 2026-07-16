@@ -11,6 +11,7 @@ Login uses the same LDAP settings as RADIUS itself (bind-as-user), gated by
 membership in the ADMIN_GROUP group.
 """
 
+import glob
 import hashlib
 import ipaddress
 import json
@@ -34,6 +35,9 @@ from ldap3.utils.conv import escape_filter_chars
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("radius-admin")
+
+# Shown in the footer; bump when the panel changes.
+ADMIN_VERSION = "1.0.0"
 
 
 def env(name, default=None, required=False):
@@ -236,6 +240,53 @@ def reload_freeradius():
     return True, f"sent HUP to radiusd (pid {pid})"
 
 
+FR_LIB_GLOBS = (
+    # Source builds (the official image uses prefix /opt) install versioned
+    # libraries, e.g. libfreeradius-server-3.2.7.so; distro packages use
+    # lib/freeradius/. Checked under the freeradius container's root.
+    "opt/lib/libfreeradius-server-*.so",
+    "opt/lib/freeradius/libfreeradius-server-*.so",
+    "usr/lib/libfreeradius-server-*.so",
+    "usr/lib/freeradius/libfreeradius-server-*.so",
+)
+FR_BANNER_RE = re.compile(r"FreeRADIUS Version ([0-9][0-9A-Za-z.]*)")
+_fr_version_cache = {"pid": None, "version": None}
+
+
+def freeradius_version():
+    """Version of the running radiusd, cached per radiusd pid.
+
+    Sharing the freeradius PID namespace makes /proc/<pid>/root traversable
+    (same uid), so first try the versioned library filename in that
+    container's filesystem; fall back to the startup banner in the tee'd
+    server log. Either can fail (LSM policy, cleared log) -- then None.
+    """
+    pid = find_radiusd_pid()
+    if pid is None:
+        return None
+    if _fr_version_cache["pid"] == pid:
+        return _fr_version_cache["version"]
+    version = None
+    for pattern in FR_LIB_GLOBS:
+        found = glob.glob(f"/proc/{pid}/root/{pattern}")
+        if found:
+            name = os.path.basename(found[0])
+            version = name[len("libfreeradius-server-"):-len(".so")]
+            break
+    if version is None:
+        try:
+            with open(LOG_FILES["freeradius"]["path"], encoding="utf-8",
+                      errors="replace") as f:
+                for line in f:
+                    m = FR_BANNER_RE.search(line)
+                    if m:
+                        version = m.group(1)  # keep the last (newest) banner
+        except OSError:
+            pass
+    _fr_version_cache.update(pid=pid, version=version)
+    return version
+
+
 # ---------------------------------------------------------------------------
 # Log viewing (shared radius-logs volume)
 # ---------------------------------------------------------------------------
@@ -379,6 +430,16 @@ def csrf_token():
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.context_processor
+def inject_versions():
+    # Versions are footer-only and gated on login, so the login page does
+    # not disclose what server versions are running.
+    return {
+        "admin_version": ADMIN_VERSION,
+        "freeradius_version": freeradius_version() if session.get("user") else None,
+    }
 
 
 @app.before_request

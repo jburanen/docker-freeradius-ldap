@@ -57,6 +57,9 @@ input[type=text], input[type=password], select {
 .muted { color:var(--muted); font-size:.85rem; }
 .row { display:flex; gap:1rem; align-items:end; flex-wrap:wrap; }
 .row > div { flex:1; min-width:12rem; }
+footer { max-width:62rem; margin:0 auto 1.5rem; padding:0 1rem; color:var(--muted); font-size:.8rem; }
+footer a { color:var(--muted); text-decoration:underline; }
+footer a:hover { color:var(--accent); }
 </style>
 </head>
 <body>
@@ -95,6 +98,13 @@ input[type=text], input[type=password], select {
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
+<footer>
+  {% if session.user %}
+  radius-admin v{{ admin_version }} &middot;
+  FreeRADIUS {{ freeradius_version or "(version unavailable)" }} &middot;
+  {% endif %}
+  <a href="https://github.com/jburanen/docker-freeradius-ldap">docker-freeradius-ldap on GitHub</a>
+</footer>
 <script>
 function copyCmd(btn) {
   const text = btn.parentElement.querySelector('code.cmd').textContent;
