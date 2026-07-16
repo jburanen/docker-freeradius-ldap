@@ -187,9 +187,9 @@ CLAUDE.md                     # project context for AI-assisted development
 
 ## Roadmap
 
-- `ntlm_auth` option for PEAP/MSCHAPv2 against Active Directory
-- TLS certificate management for EAP
 - Manage NAS clients and the group gate from the admin panel
+- Add read-only user group and necessary RBAC
+- Package into simpler form not requiring --build for deployment/refresh
 
 ## License
 
