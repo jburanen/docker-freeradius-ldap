@@ -21,6 +21,7 @@ services:
     volumes:
       - ./freeradius/raddb/clients.conf:/etc/raddb/clients.conf:ro
       - ./freeradius/raddb/mods-enabled/ldap:/etc/raddb/mods-enabled/ldap:ro
+      - ./freeradius/raddb/mods-enabled/linelog-authlog:/etc/raddb/mods-enabled/linelog-authlog:ro
       - ./freeradius/raddb/sites-available/default:/etc/raddb/sites-available/default:ro
       - ./freeradius/raddb/sites-available/inner-tunnel:/etc/raddb/sites-available/inner-tunnel:ro
       # Shared with radius-admin, which writes the generated 'authorize'

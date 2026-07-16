@@ -63,24 +63,26 @@ AUTHORIZE_PATH = os.path.join(RADIUS_FILES_DIR, "authorize")
 
 # Log files shown on the Logs page, both on the shared radius-logs volume:
 # radius.log is tee'd from the freeradius container's stdout (see
-# docker-compose.yml, includes rlm_ldap messages); admin.log is this app's
-# own logging (LDAP binds, panel logins, applies) via the handler below.
+# docker-compose.yml, includes rlm_ldap messages); auth.log collects every
+# RADIUS authentication result (written by FreeRADIUS's linelog module, see
+# mods-enabled/linelog-authlog) plus this app's own logging (LDAP binds,
+# panel logins, applies) via the handler below.
 LOG_DIR = env("RADIUS_LOG_DIR", "/logs")
 LOG_FILES = {
     "freeradius": {"label": "FreeRADIUS", "path": os.path.join(LOG_DIR, "radius.log")},
-    "admin": {"label": "Admin panel / LDAP", "path": os.path.join(LOG_DIR, "admin.log")},
+    "auth": {"label": "LDAP / auth", "path": os.path.join(LOG_DIR, "auth.log")},
 }
 RADIUS_LOG_MAX_MB = int(env("RADIUS_LOG_MAX_MB", "10"))
 LOG_TAIL_BYTES = 64 * 1024
 
 try:
     # Append mode (O_APPEND), so in-place truncation by rotate/clear is safe.
-    _file_handler = logging.FileHandler(LOG_FILES["admin"]["path"])
-    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _file_handler = logging.FileHandler(LOG_FILES["auth"]["path"])
+    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s radius-admin: %(message)s"))
     logging.getLogger().addHandler(_file_handler)
 except OSError as _exc:
-    log.warning("cannot open %s: %s -- admin log page will be empty",
-                LOG_FILES["admin"]["path"], _exc)
+    log.warning("cannot open %s: %s -- auth log page will be incomplete",
+                LOG_FILES["auth"]["path"], _exc)
 
 ATTR_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 UNQUOTED_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -256,9 +258,10 @@ def read_log_tail(path):
 def rotate_log_if_needed(path):
     """Cap a log at RADIUS_LOG_MAX_MB, keeping one previous generation.
 
-    Both writers (tee for radius.log, the FileHandler for admin.log) hold an
-    O_APPEND fd on the file, so it must be truncated in place -- replacing
-    the file would leave the writer appending to an orphaned inode. Lines
+    The persistent writers (tee for radius.log, the FileHandler for auth.log)
+    hold an O_APPEND fd on the file, so it must be truncated in place --
+    replacing the file would leave the writer appending to an orphaned inode
+    (linelog reopens auth.log per message, so it is safe either way). Lines
     written between the copy and the truncate are lost, the same trade-off
     as logrotate's copytruncate.
     """

@@ -32,6 +32,10 @@ custom RADIUS reply attributes.
   - `clients.conf` — NAS clients, `$ENV`-driven
   - `mods-enabled/ldap` — rlm_ldap; user+group lookup, bind-as-user auth;
     `pool.start = 0` so the server starts even if LDAP is down
+  - `mods-enabled/linelog-authlog` — two linelog instances appending one
+    line per final auth result to `/logs/auth.log`; called from the outer
+    site's post-auth / Post-Auth-Type REJECT (outer only, or EAP would
+    double-log)
   - `sites-available/default` and `inner-tunnel` — replace stock sites
     (stock `sites-enabled/` symlinks point there, so mounting over
     sites-available is sufficient). PAP → `Auth-Type ldap` (bind-as-user);
@@ -47,11 +51,12 @@ custom RADIUS reply attributes.
   (`pid: "container:freeradius"`). Login = LDAP bind-as-user with the same
   `LDAP_*` env vars, gated by `ADMIN_GROUP` membership (memberOf first, then
   member/uniqueMember/memberUid group search). A tabbed "Logs" page tails
-  `/logs/radius.log` (radiusd, incl. rlm_ldap) and `/logs/admin.log` (the
-  panel's own logging: LDAP binds/logins/applies, via a root-logger
-  FileHandler) from the `radius-logs` volume — 3 s auto-refresh, clear
-  button, copytruncate rotation at `RADIUS_LOG_MAX_MB` (default 10) each.
-  Vendor presets: Cisco
+  `/logs/radius.log` (raw radiusd, incl. rlm_ldap) and `/logs/auth.log`
+  (per-request auth results from linelog, `radius:` prefix, interleaved
+  with the panel's own LDAP logins/binds/applies via a root-logger
+  FileHandler, `radius-admin:` prefix) from the `radius-logs` volume —
+  3 s auto-refresh, clear button, copytruncate rotation at
+  `RADIUS_LOG_MAX_MB` (default 10) each. Vendor presets: Cisco
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
   dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x
@@ -85,10 +90,12 @@ custom RADIUS reply attributes.
   requirement for all devices — that's why the default is explicit.
 - Compose fails fast if `.env` is missing (`env_file` is required) — that's
   intentional, it forces `cp .env.example .env`.
-- tee holds an O_APPEND fd on `/logs/radius.log`, so radius-admin must rotate
-  and clear it with in-place `os.truncate` — never `os.replace`, which would
-  leave tee appending to an orphaned inode. The volume mounts at `/logs`,
-  deliberately not `/var/log/radius`, so radacct detail files stay out of it.
+- tee holds an O_APPEND fd on `/logs/radius.log` and the panel's FileHandler
+  one on `/logs/auth.log`, so radius-admin must rotate and clear them with
+  in-place `os.truncate` — never `os.replace`, which would leave the writer
+  appending to an orphaned inode (linelog reopens auth.log per message and
+  tolerates either). The volume mounts at `/logs`, deliberately not
+  `/var/log/radius`, so radacct detail files stay out of it.
 - SIGHUP reload of rlm_files is transactional: a users file that fails to
   parse leaves the previously loaded rules active, so a bad Apply can't take
   auth down. radius-admin overwrites the generated `authorize` on its own

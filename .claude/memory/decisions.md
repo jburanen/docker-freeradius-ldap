@@ -26,10 +26,15 @@ Volume mounts at `/logs`, not `/var/log/radius`, to keep radacct out of it.
 **Rejected alternatives:** docker.sock + logs API (root-equivalent exposure);
 `-l /path/file` only (loses docker logs); reading radiusd's stdout fd via the
 shared PID namespace (would steal data from the docker log driver).
-**Amended same day:** the page is now tabbed; radius-admin also writes its
-own log (LDAP binds/logins/applies) to `/logs/admin.log` via a root-logger
-FileHandler (append mode, so the same in-place truncate rules apply). The
-rlm_ldap side of LDAP troubleshooting is already in radius.log.
+**Amended same day (twice):** the page is now tabbed. Second tab is
+`/logs/auth.log`, shared by two writers: FreeRADIUS linelog instances
+(mods-enabled/linelog-authlog, called from the outer post-auth /
+Post-Auth-Type REJECT — outer only, or EAP double-logs) emitting one
+`radius:` line per final Access-Accept/Reject incl. Module-Failure-Message,
+and radius-admin's root-logger FileHandler (`radius-admin:` lines for panel
+logins/binds/applies). Chosen over `log { auth = yes }` because that needs
+mounting/maintaining the whole stock radiusd.conf and lands in the wrong
+stream anyway. Both writers append, so in-place truncate rules apply.
 
 ## 2026-07-15 — Custom attributes via rlm_files users file + SIGHUP
 **Decided:** The admin panel renders attribute rules (LDAP group → reply

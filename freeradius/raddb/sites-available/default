@@ -103,10 +103,15 @@ server default {
 		exec
 		remove_reply_message_if_eap
 
+		# Auth result lines for the admin panel's LDAP / auth log tab
+		# (mods-enabled/linelog-authlog).
+		authlog_ok
+
 		Post-Auth-Type REJECT {
 			attr_filter.access_reject
 			eap
 			remove_reply_message_if_eap
+			authlog_reject
 		}
 	}
 

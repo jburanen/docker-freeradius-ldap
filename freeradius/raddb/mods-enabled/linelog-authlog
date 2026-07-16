@@ -1,0 +1,22 @@
+# One line per final authentication result, appended to /logs/auth.log on
+# the shared radius-logs volume. The radius-admin panel writes its own LDAP
+# login events to the same file, so its "LDAP / auth" log tab shows both.
+# Called from sites-available/default post-auth (outer server only -- the
+# inner tunnel would double-log EAP requests).
+#
+# linelog reopens the file for every message, so the panel's in-place
+# copytruncate rotation is safe. The stock linelog instance stays untouched.
+
+linelog authlog_ok {
+	filename = /logs/auth.log
+	permissions = 0644
+	format = "%S INFO radius: Access-Accept for %{User-Name} (client %{Packet-Src-IP-Address}, NAS %{%{NAS-IP-Address}:-?})"
+}
+
+linelog authlog_reject {
+	filename = /logs/auth.log
+	permissions = 0644
+	# Failure detail: this request's Module-Failure-Message, or the one the
+	# inner tunnel copied into session-state for EAP, or nothing.
+	format = "%S WARNING radius: Access-Reject for %{User-Name} (client %{Packet-Src-IP-Address}, NAS %{%{NAS-IP-Address}:-?}) -- %{%{Module-Failure-Message}:-%{%{session-state:Module-Failure-Message}:-no failure detail}}"
+}
