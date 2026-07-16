@@ -22,7 +22,9 @@ custom RADIUS reply attributes.
 ## Architecture
 
 - `freeradius` service: official `freeradius/freeradius-server:3.2.7-alpine`
-  image, UDP 1812/1813, logs to stdout (`radiusd -f -l stdout` behind a
+  image (overridable via `FREERADIUS_IMAGE`; the default is duplicated in
+  radius-admin's environment for the footer fallback — keep in sync),
+  UDP 1812/1813, logs to stdout (`radiusd -f -l stdout` behind a
   fifo + `tee` that also appends to `/logs/radius.log` on the `radius-logs`
   volume for the admin panel's log viewer; `exec` keeps radiusd PID 1).
   Alpine variant is required: its libldap links OpenSSL like FreeRADIUS itself,
@@ -57,10 +59,12 @@ custom RADIUS reply attributes.
   FileHandler, `radius-admin:` prefix) from the `radius-logs` volume —
   3 s auto-refresh, clear button, copytruncate rotation at
   `RADIUS_LOG_MAX_MB` (default 10) each. A login-gated footer shows
-  `ADMIN_VERSION` and the running FreeRADIUS version (probed through the
-  shared PID namespace via the `libfreeradius-server-<ver>.so` filename
-  under `/proc/<pid>/root`, falling back to the log banner; cached per
-  radiusd pid). Vendor presets: Cisco
+  `ADMIN_VERSION` and the running FreeRADIUS version, found by regex-scanning
+  the radiusd binary / libfreeradius-server.so through `/proc/<pid>` in the
+  shared PID namespace (cached per radiusd pid; the compiled-in version
+  literal is the only live source — radiusd logs it only under -v/-X and
+  the .so filenames are unversioned). Falls back to the `FREERADIUS_IMAGE`
+  tag. Vendor presets: Cisco
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
   dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x

@@ -2,7 +2,9 @@ services:
   freeradius:
     # Alpine variant: libldap is built against OpenSSL, matching FreeRADIUS —
     # the Ubuntu-based image mixes GnuTLS/OpenSSL and warns of possible crashes.
-    image: freeradius/freeradius-server:3.2.7-alpine
+    # Overridable from .env; keep the default in sync with the radius-admin
+    # FREERADIUS_IMAGE default below (footer version fallback).
+    image: ${FREERADIUS_IMAGE:-freeradius/freeradius-server:3.2.7-alpine}
     container_name: freeradius
     # Log to container stdout AND to the shared radius-logs volume (read by
     # the radius-admin log viewer). tee runs off a fifo so `exec` can keep
@@ -41,6 +43,10 @@ services:
     build: ./web
     container_name: radius-admin
     env_file: .env
+    environment:
+      # Last-resort source for the footer's FreeRADIUS version when the
+      # /proc probe is blocked. Same value/default as the freeradius image.
+      FREERADIUS_IMAGE: ${FREERADIUS_IMAGE:-freeradius/freeradius-server:3.2.7-alpine}
     ports:
       - "0.0.0.0:${ADMIN_PORT:-8080}:8080"
     volumes:

@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.0.0"
+ADMIN_VERSION = "1.0.1"
 
 
 def env(name, default=None, required=False):
@@ -240,51 +240,60 @@ def reload_freeradius():
     return True, f"sent HUP to radiusd (pid {pid})"
 
 
-FR_LIB_GLOBS = (
-    # Source builds (the official image uses prefix /opt) install versioned
-    # libraries, e.g. libfreeradius-server-3.2.7.so; distro packages use
-    # lib/freeradius/. Checked under the freeradius container's root.
-    "opt/lib/libfreeradius-server-*.so",
-    "opt/lib/freeradius/libfreeradius-server-*.so",
-    "usr/lib/libfreeradius-server-*.so",
-    "usr/lib/freeradius/libfreeradius-server-*.so",
-)
-FR_BANNER_RE = re.compile(r"FreeRADIUS Version ([0-9][0-9A-Za-z.]*)")
-_fr_version_cache = {"pid": None, "version": None}
+# The full version string ("FreeRADIUS Version 3.2.7, for host ...") is a
+# compile-time literal in radiusd / libfreeradius-server.so. radiusd never
+# logs it outside -v/-X, and the installed .so filenames are unversioned,
+# so reading the binaries is the only live source (verified against
+# v3.2.x radiusd.c and the official image Dockerfile, 2026-07-16).
+FR_VERSION_RE = re.compile(rb"FreeRADIUS Version (\d+\.\d+[0-9A-Za-z.]*)")
+FREERADIUS_IMAGE = env("FREERADIUS_IMAGE", "")
+_fr_version_cache = {"pid": None, "version": None, "checked": 0.0}
+
+
+def _probe_freeradius_version(pid):
+    # Both containers run uid 0 in the shared PID namespace, which makes
+    # /proc/<pid>/root and /proc/<pid>/exe readable (LSM policy permitting).
+    candidates = [f"/proc/{pid}/exe"]
+    for libdir in ("opt/lib", "opt/lib/freeradius", "usr/lib", "usr/lib/freeradius"):
+        candidates += glob.glob(f"/proc/{pid}/root/{libdir}/libfreeradius-server*.so")
+    for path in candidates:
+        try:
+            with open(path, "rb") as f:
+                m = FR_VERSION_RE.search(f.read())
+        except OSError:
+            continue
+        if m:
+            return m.group(1).decode()
+    return None
+
+
+def image_tag_version():
+    # freeradius/freeradius-server:3.2.7-alpine -> "3.2.7"
+    m = re.search(r":(\d+\.\d+[0-9A-Za-z.]*)", FREERADIUS_IMAGE)
+    return m.group(1) if m else None
 
 
 def freeradius_version():
-    """Version of the running radiusd, cached per radiusd pid.
+    """Version of the running radiusd, else the configured image tag.
 
-    Sharing the freeradius PID namespace makes /proc/<pid>/root traversable
-    (same uid), so first try the versioned library filename in that
-    container's filesystem; fall back to the startup banner in the tee'd
-    server log. Either can fail (LSM policy, cleared log) -- then None.
+    Probe results are cached per radiusd pid; failures are retried at most
+    once a minute so page loads stay cheap.
     """
     pid = find_radiusd_pid()
-    if pid is None:
-        return None
-    if _fr_version_cache["pid"] == pid:
-        return _fr_version_cache["version"]
-    version = None
-    for pattern in FR_LIB_GLOBS:
-        found = glob.glob(f"/proc/{pid}/root/{pattern}")
-        if found:
-            name = os.path.basename(found[0])
-            version = name[len("libfreeradius-server-"):-len(".so")]
-            break
-    if version is None:
-        try:
-            with open(LOG_FILES["freeradius"]["path"], encoding="utf-8",
-                      errors="replace") as f:
-                for line in f:
-                    m = FR_BANNER_RE.search(line)
-                    if m:
-                        version = m.group(1)  # keep the last (newest) banner
-        except OSError:
-            pass
-    _fr_version_cache.update(pid=pid, version=version)
-    return version
+    now = time.monotonic()
+    if pid is not None:
+        cache = _fr_version_cache
+        if cache["pid"] == pid and (cache["version"] or now - cache["checked"] < 60):
+            version = cache["version"]
+        else:
+            version = _probe_freeradius_version(pid)
+            if version is None and cache["pid"] != pid:
+                log.info("cannot read the radiusd binary via /proc/%d (LSM "
+                         "policy?); footer shows the FREERADIUS_IMAGE tag", pid)
+            cache.update(pid=pid, version=version, checked=now)
+        if version:
+            return version
+    return image_tag_version()
 
 
 # ---------------------------------------------------------------------------

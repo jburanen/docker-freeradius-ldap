@@ -79,6 +79,7 @@ filter with `sAMAccountName`, `memberOf` group membership).
 | Area | Variables |
 |------|-----------|
 | Ports | `RADIUS_AUTH_PORT`, `RADIUS_ACCT_PORT`, `ADMIN_PORT` |
+| Server image | `FREERADIUS_IMAGE` (optional override) |
 | RADIUS clients | `RADIUS_CLIENT_IP`, `RADIUS_CLIENT_SECRET` |
 | Access policy | `RADIUS_REQUIRED_GROUP` |
 | Admin panel | `ADMIN_GROUP`, `ADMIN_SESSION_SECRET`, `RADIUS_LOG_MAX_MB` |

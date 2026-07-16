@@ -15,17 +15,21 @@ rejected.
 
 ## 2026-07-16 — Footer FreeRADIUS version probed via /proc/<pid>/root
 **Decided:** The panel footer shows `ADMIN_VERSION` (constant in app.py,
-starts at 1.0.0, bump on panel changes) and the running FreeRADIUS version,
-read through the already-shared PID namespace: same-uid access to
-`/proc/<radiusd pid>/root` lets us glob the versioned
-`libfreeradius-server-<ver>.so` filename (source builds use prefix /opt);
-fallback is the "FreeRADIUS Version x.y.z" banner in the tee'd radius.log.
-Cached per radiusd pid; shows "(version unavailable)" if both fail (LSM
-policy can block /proc/<pid>/root traversal on some hosts). Versions render
-only when logged in — no disclosure on the login page.
-**Rejected alternatives:** hardcoding the compose image tag (lies after an
-image change); passing the tag through .env (version pin belongs in compose,
-not site config); Status-Server query (needs a RADIUS client lib + secret).
+bump on panel changes) and the running FreeRADIUS version, read through the
+already-shared PID namespace (same-uid access, both containers run root):
+regex-scan `/proc/<pid>/exe` and `/proc/<pid>/root/opt/lib/
+libfreeradius-server*.so` for the compiled-in "FreeRADIUS Version x.y.z"
+literal, cached per radiusd pid (failed probes retried at most 1/min).
+Last resort: parse the `FREERADIUS_IMAGE` tag, interpolated in compose for
+the freeradius image and passed to radius-admin (defaults duplicated in
+compose — keep in sync). Versions render only when logged in.
+**Why the binary scan (learned 2026-07-16, first attempt shipped broken):**
+the image's .so filenames are UNVERSIONED (no `-3.2.7.so` suffix), and
+radiusd logs its version banner only under -v/-X, never in normal mode —
+verified against v3.2.x radiusd.c and the alpine Dockerfile (prefix /opt,
+no USER directive). So filename-glob and log-banner probes can never work.
+**Rejected alternatives:** Status-Server query (needs a RADIUS client lib +
+secret); mounting docker.sock (security).
 
 ## 2026-07-16 — Admin panel log viewer via fifo + tee onto a shared volume
 **Decided:** radiusd keeps logging to stdout, but the compose command routes
