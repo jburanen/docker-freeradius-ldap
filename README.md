@@ -46,6 +46,11 @@ dictionary FreeRADIUS loads.
 - Saving a rule never touches the running server until you press Apply; the
   dashboard shows a "pending changes" badge and a live preview of the
   generated file.
+
+![screencap of the rule management page](images/rules.png)
+
+![screencap of the rule addition page](images/newrule.png)
+
 - **Logs** shows two live, auto-refreshing tails: the raw radiusd output
   (the same stream as `docker compose logs freeradius`, including rlm_ldap
   directory messages), and an **LDAP / auth** log with one line per RADIUS
@@ -54,6 +59,9 @@ dictionary FreeRADIUS loads.
   panel's own logins, binds, and rule applies. Both files live on a shared
   volume, each capped at `RADIUS_LOG_MAX_MB` (default 10 MB, one previous
   generation kept).
+
+![screencap of the logs page](images/logs.png)
+
 - The panel speaks plain HTTP; put a TLS reverse proxy in front of it for
   production.
 
@@ -71,6 +79,8 @@ multi-select which instances receive it — in one click.
    shared, so one action joins the full mesh.
 3. The dashboard's Apply box then lists every instance with checkboxes
    (all selected by default).
+
+![screencap of the cluster status page](images/cluster.png)
 
 Notes: instance-to-instance calls are HMAC-signed with `CLUSTER_SECRET`
 (the secret is never transmitted; clocks must agree within 5 minutes).
