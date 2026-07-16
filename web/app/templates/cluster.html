@@ -2,7 +2,7 @@
 {% block content %}
 
 <div class="card">
-  <h2>This instance</h2>
+  <h2>This Instance</h2>
   <table>
     <tr><th>Name</th><th>URL</th><th>Clustering</th></tr>
     <tr>
@@ -25,7 +25,7 @@
 </div>
 
 <div class="card">
-  <h2>Cluster instances</h2>
+  <h2>Cluster Instances</h2>
   <p class="muted">Rules are pushed from the dashboard's Apply box &mdash;
   select which instances receive the ruleset there. Each instance keeps its
   own copy; the last apply wins. An apply that cannot reach an instance is
@@ -35,26 +35,30 @@
 
   {% if peers %}
   <table>
-    <tr><th>Instance</th><th>URL</th><th>Version</th><th>Last applied</th><th>Rules</th><th></th></tr>
+    <tr>
+      <th style="width:25%;">Instance</th>
+      <th>URL</th>
+      <th style="width:5rem;">Version</th>
+      <th style="width:11rem;">Rules</th>
+      <th style="width:1%;"></th>
+    </tr>
     {% for p in peers %}
     {% set s = statuses[p.url] %}
     <tr>
       <td>{{ s.name or p.name }}</td>
       <td>{{ p.url }}</td>
       {% if s.error %}
-      <td colspan="2"><span class="badge off">unreachable</span>
-          <span class="muted">{{ s.error }}</span></td>
+      <td><span class="badge off" title="{{ s.error }}">unreachable</span></td>
       {% else %}
       <td>v{{ s.version }}</td>
-      <td class="muted">{{ s.state.applied_at or "never" }}
-          {% if s.state.applied_by %}by {{ s.state.applied_by }}{% endif %}</td>
       {% endif %}
       <td>
         {% if not s.error %}
+        {% set applied_info %}Last applied: {{ s.state.applied_at or "never" }}{% if s.state.applied_by %} by {{ s.state.applied_by }}{% endif %}{% endset %}
         {% if s.rules_hash == local_hash %}
-        <span class="badge applied">same as here</span>
+        <span class="badge applied" title="{{ applied_info }}">matching</span>
         {% else %}
-        <span class="badge pending">differs</span>
+        <span class="badge pending" title="{{ applied_info }}">differs</span>
         {% endif %}
         {% endif %}
         {% if p.url in pending %}

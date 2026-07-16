@@ -3,7 +3,7 @@
 
 <div class="card">
   <div class="row" style="align-items:center;">
-    <div><h2 style="margin:0;">Attribute rules</h2></div>
+    <div><h2 style="margin:0;">Attribute Rules</h2></div>
     <div style="flex:0;">
       <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
     </div>
@@ -51,18 +51,24 @@
 </div>
 
 <div class="card">
-  <div class="row" style="align-items:center;">
-    <div>
-      <h2 style="margin:0;">Apply to FreeRADIUS
-        {% if pending %}<span class="badge pending">pending changes</span>
-        {% else %}<span class="badge applied">in sync</span>{% endif %}
-      </h2>
+  <h2>Apply to FreeRADIUS
+    {% if pending %}<span class="badge pending">pending changes</span>
+    {% else %}<span class="badge applied">in sync</span>{% endif %}
+  </h2>
+  <div class="apply-layout">
+    <div class="preview-col">
+      <h2>Generated users file preview</h2>
+      <pre class="preview">{{ preview }}</pre>
+      {% if state.applied_at %}
+      <p class="muted">Last applied {{ state.applied_at }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
+      {% endif %}
     </div>
-    <div style="flex:0;">
+    <div class="apply-side">
       <form method="post" action="{{ url_for('apply') }}">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         {% if peers %}
         <input type="hidden" name="has_targets" value="1">
+        <h2>Instances</h2>
         <div class="targets">
           <label><input type="checkbox" name="target" value="local" checked>
             {{ node_name }} <span class="muted">(this instance)</span></label>
@@ -76,11 +82,6 @@
       </form>
     </div>
   </div>
-  {% if state.applied_at %}
-  <p class="muted">Last applied {{ state.applied_at }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
-  {% endif %}
-  <h2>Generated users file preview</h2>
-  <pre class="preview">{{ preview }}</pre>
 </div>
 
 {% endblock %}
