@@ -120,6 +120,23 @@ filter with `sAMAccountName`, `memberOf` group membership).
 
 After changing `.env`, apply with `docker compose up -d --force-recreate freeradius`.
 
+### Upgrading
+
+New versions can introduce new `.env` variables. After a `git pull`, merge
+them into your existing `.env` without touching your customizations:
+
+```sh
+./merge-env.sh
+```
+
+It appends any variable that `.env.example` has and your `.env` lacks
+(backing `.env` up to `.env.bak` first), prints exactly what it added, and
+never modifies existing lines — run it as often as you like. Review the
+added values (each is documented in `.env.example`; some are placeholders
+like `CLUSTER_NODE_NAME`), then `docker compose up -d --build --force-recreate`.
+Optional variables that ship commented out (e.g. `FREERADIUS_IMAGE`) are
+not copied — enable those by hand.
+
 ## Authentication methods
 
 | Method | Works against | Notes |
@@ -140,6 +157,7 @@ docker compose run --rm freeradius radiusd -X   # full debug mode, foreground
 ```
 docker-compose.yml            # the whole stack
 .env.example                  # all settings, documented (copy to .env)
+merge-env.sh                  # after git pull: append new vars to your .env
 freeradius/raddb/             # config mounted over the image defaults
   clients.conf                #   NAS clients ($ENV-driven)
   mods-enabled/ldap           #   LDAP module ($ENV-driven)

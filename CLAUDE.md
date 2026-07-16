@@ -135,6 +135,7 @@ custom RADIUS reply attributes.
 
 ```sh
 docker compose up -d                    # deploy / apply compose changes
+./merge-env.sh                          # after git pull: append new .env vars
 docker compose logs -f freeradius
 docker compose logs -f radius-admin
 docker compose exec freeradius radtest <user> <pass> localhost 0 <secret>
