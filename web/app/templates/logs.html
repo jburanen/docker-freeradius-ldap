@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div class="row" style="align-items:center;">
+    <div><h2 style="margin:0;">FreeRADIUS server log</h2></div>
+    <div style="flex:0; white-space:nowrap;">
+      <label class="check-label"><input type="checkbox" id="autorefresh" checked> Auto-refresh</label>
+      <form class="inline" method="post" action="{{ url_for('logs_clear') }}"
+            onsubmit="return confirm('Clear the server log?');">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn small danger" type="submit">Clear log</button>
+      </form>
+    </div>
+  </div>
+  <p class="muted">Live radiusd output &mdash; the same stream as
+  <code>docker compose logs freeradius</code>. Shows the last
+  {{ tail_kb }}&nbsp;KB; the file is rotated once it exceeds
+  {{ max_mb }}&nbsp;MB.</p>
+
+  {% if log_text is none %}
+  <p class="muted">No log file yet. If the stack was just updated, recreate the
+  server so it starts writing to the shared volume:
+  <code>docker compose up -d --force-recreate freeradius radius-admin</code></p>
+  {% endif %}
+  <pre class="preview log" id="log">{{ log_text or "" }}</pre>
+</div>
+
+<script>
+const pre = document.getElementById('log');
+const auto = document.getElementById('autorefresh');
+pre.scrollTop = pre.scrollHeight;  // open at the newest lines
+
+async function refreshLog() {
+  if (!auto.checked || document.hidden) return;
+  try {
+    const resp = await fetch('{{ url_for("logs_tail") }}', {cache: 'no-store'});
+    if (!resp.ok) return;  // e.g. session expired
+    const text = await resp.text();
+    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+    pre.textContent = text;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;  // follow unless scrolled up
+  } catch (e) { /* transient network error; try again next tick */ }
+}
+setInterval(refreshLog, 3000);
+</script>
+
+{% endblock %}

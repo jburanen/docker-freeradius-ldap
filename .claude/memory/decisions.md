@@ -13,6 +13,20 @@ rejected.
 **Rejected alternatives:** ...
 ```
 
+## 2026-07-16 — Admin panel log viewer via fifo + tee onto a shared volume
+**Decided:** radiusd keeps logging to stdout, but the compose command routes
+it through a fifo into `tee -a /logs/radius.log` (named volume `radius-logs`,
+mounted rw in radius-admin). `exec` keeps radiusd as PID 1 for docker-stop
+signals. The panel's `/logs` page tails the last 64 KB with 3 s polling;
+rotation is copytruncate at `RADIUS_LOG_MAX_MB` (default 10, one `.1`
+generation) because tee holds an O_APPEND fd — never replace the inode.
+Volume mounts at `/logs`, not `/var/log/radius`, to keep radacct out of it.
+**Why:** No docker.sock in a web-facing container, no custom image, and
+`docker compose logs -f freeradius` still works unchanged.
+**Rejected alternatives:** docker.sock + logs API (root-equivalent exposure);
+`-l /path/file` only (loses docker logs); reading radiusd's stdout fd via the
+shared PID namespace (would steal data from the docker log driver).
+
 ## 2026-07-15 — Custom attributes via rlm_files users file + SIGHUP
 **Decided:** The admin panel renders attribute rules (LDAP group → reply
 attributes) into a FreeRADIUS users file on a shared named volume

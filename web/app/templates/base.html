@@ -41,6 +41,10 @@ form.inline { display:inline; }
 .badge.applied { background:#e7f5ec; color:var(--ok); border:1px solid #b5dfc3; }
 .badge.off { background:#eef0f3; color:var(--muted); border:1px solid var(--line); }
 pre.preview { background:#101826; color:#d7e2ee; border-radius:8px; padding:1rem; overflow-x:auto; font-size:.83rem; }
+pre.preview.log { max-height:65vh; overflow:auto; }
+.check-label { display:inline; color:var(--muted); font-size:.85rem; margin-right:.6rem; }
+header nav a { color:#9fb0c3; font-size:.9rem; margin-right:.8rem; }
+header nav a:hover { color:#fff; text-decoration:none; }
 label { display:block; font-size:.85rem; color:var(--muted); margin:.7rem 0 .2rem; }
 input[type=text], input[type=password], select {
   width:100%; padding:.42rem .6rem; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
@@ -54,6 +58,12 @@ input[type=text], input[type=password], select {
 <body>
 <header>
   <h1>RADIUS Admin</h1>
+  {% if session.user %}
+  <nav>
+    <a href="{{ url_for('index') }}">Rules</a>
+    <a href="{{ url_for('logs') }}">Server log</a>
+  </nav>
+  {% endif %}
   <div class="spacer"></div>
   {% if session.user %}
   <span class="user">{{ session.user }}</span>

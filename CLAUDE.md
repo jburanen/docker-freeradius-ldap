@@ -22,8 +22,10 @@ custom RADIUS reply attributes.
 ## Architecture
 
 - `freeradius` service: official `freeradius/freeradius-server:3.2.7-alpine`
-  image, UDP 1812/1813, logs to stdout (`radiusd -f -l stdout`). Alpine
-  variant is required: its libldap links OpenSSL like FreeRADIUS itself,
+  image, UDP 1812/1813, logs to stdout (`radiusd -f -l stdout` behind a
+  fifo + `tee` that also appends to `/logs/radius.log` on the `radius-logs`
+  volume for the admin panel's log viewer; `exec` keeps radiusd PID 1).
+  Alpine variant is required: its libldap links OpenSSL like FreeRADIUS itself,
   while the Ubuntu image mixes GnuTLS/OpenSSL (rlm_ldap warns of TLS
   instability/crashes).
 - Mounted config (repo `freeradius/raddb/` → container `/etc/raddb/`):
@@ -44,7 +46,10 @@ custom RADIUS reply attributes.
   Apply = rewrite file + SIGHUP radiusd via shared PID namespace
   (`pid: "container:freeradius"`). Login = LDAP bind-as-user with the same
   `LDAP_*` env vars, gated by `ADMIN_GROUP` membership (memberOf first, then
-  member/uniqueMember/memberUid group search). Vendor presets: Cisco
+  member/uniqueMember/memberUid group search). A "Server log" page tails
+  `/logs/radius.log` from the `radius-logs` volume (3 s auto-refresh, clear
+  button, copytruncate rotation at `RADIUS_LOG_MAX_MB`, default 10).
+  Vendor presets: Cisco
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
   dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x
@@ -78,6 +83,10 @@ custom RADIUS reply attributes.
   requirement for all devices — that's why the default is explicit.
 - Compose fails fast if `.env` is missing (`env_file` is required) — that's
   intentional, it forces `cp .env.example .env`.
+- tee holds an O_APPEND fd on `/logs/radius.log`, so radius-admin must rotate
+  and clear it with in-place `os.truncate` — never `os.replace`, which would
+  leave tee appending to an orphaned inode. The volume mounts at `/logs`,
+  deliberately not `/var/log/radius`, so radacct detail files stay out of it.
 - SIGHUP reload of rlm_files is transactional: a users file that fails to
   parse leaves the previously loaded rules active, so a bad Apply can't take
   auth down. radius-admin overwrites the generated `authorize` on its own

@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import signal
 import ssl
 import time
@@ -59,6 +60,12 @@ RADIUS_FILES_DIR = env("RADIUS_FILES_DIR", "/radius-files")
 RULES_PATH = os.path.join(DATA_DIR, "rules.json")
 STATE_PATH = os.path.join(DATA_DIR, "state.json")
 AUTHORIZE_PATH = os.path.join(RADIUS_FILES_DIR, "authorize")
+
+# radiusd log file, tee'd from the freeradius container's stdout onto the
+# shared radius-logs volume (see docker-compose.yml).
+RADIUS_LOG_PATH = os.path.join(env("RADIUS_LOG_DIR", "/logs"), "radius.log")
+RADIUS_LOG_MAX_MB = int(env("RADIUS_LOG_MAX_MB", "10"))
+LOG_TAIL_BYTES = 64 * 1024
 
 ATTR_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 UNQUOTED_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -210,6 +217,43 @@ def reload_freeradius():
     except OSError as exc:
         return False, f"failed to signal radiusd (pid {pid}): {exc}"
     return True, f"sent HUP to radiusd (pid {pid})"
+
+
+# ---------------------------------------------------------------------------
+# radiusd log viewing (shared radius-logs volume)
+# ---------------------------------------------------------------------------
+
+def read_log_tail():
+    """Last LOG_TAIL_BYTES of the radiusd log, or None if there is no file."""
+    try:
+        with open(RADIUS_LOG_PATH, "rb") as f:
+            size = f.seek(0, os.SEEK_END)
+            f.seek(max(0, size - LOG_TAIL_BYTES))
+            data = f.read()
+    except OSError:
+        return None
+    text = data.decode("utf-8", "replace")
+    if size > LOG_TAIL_BYTES:
+        text = text.split("\n", 1)[-1]  # drop the leading partial line
+    return text
+
+
+def rotate_log_if_needed():
+    """Cap the log at RADIUS_LOG_MAX_MB, keeping one previous generation.
+
+    tee holds an O_APPEND fd on the file, so it must be truncated in place --
+    replacing the file would leave tee appending to an orphaned inode. Lines
+    written between the copy and the truncate are lost, the same trade-off
+    as logrotate's copytruncate.
+    """
+    try:
+        if os.path.getsize(RADIUS_LOG_PATH) <= RADIUS_LOG_MAX_MB * 1024 * 1024:
+            return
+        shutil.copyfile(RADIUS_LOG_PATH, RADIUS_LOG_PATH + ".1")
+        os.truncate(RADIUS_LOG_PATH, 0)
+        log.info("rotated %s (> %d MB)", RADIUS_LOG_PATH, RADIUS_LOG_MAX_MB)
+    except OSError as exc:
+        log.warning("log rotation failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +557,38 @@ def apply():
     log.info("apply by %s: %s", session.get("user"), message)
     flash(message, "ok" if ok else "error")
     return redirect(url_for("index"))
+
+
+@app.route("/logs")
+@login_required
+def logs():
+    rotate_log_if_needed()
+    return render_template(
+        "logs.html",
+        log_text=read_log_tail(),
+        tail_kb=LOG_TAIL_BYTES // 1024,
+        max_mb=RADIUS_LOG_MAX_MB,
+    )
+
+
+@app.get("/logs/tail")
+@login_required
+def logs_tail():
+    # Polled by the auto-refresh script on the logs page.
+    text = read_log_tail()
+    return (text or "", {"Content-Type": "text/plain; charset=utf-8"})
+
+
+@app.post("/logs/clear")
+@login_required
+def logs_clear():
+    try:
+        os.truncate(RADIUS_LOG_PATH, 0)  # in place: tee keeps its O_APPEND fd
+        log.info("log cleared by %s", session.get("user"))
+        flash("Server log cleared.", "ok")
+    except OSError as exc:
+        flash(f"Could not clear the log: {exc}", "error")
+    return redirect(url_for("logs"))
 
 
 # ---------------------------------------------------------------------------

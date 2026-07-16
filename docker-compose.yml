@@ -4,7 +4,16 @@ services:
     # the Ubuntu-based image mixes GnuTLS/OpenSSL and warns of possible crashes.
     image: freeradius/freeradius-server:3.2.7-alpine
     container_name: freeradius
-    command: ["radiusd", "-f", "-l", "stdout"]
+    # Log to container stdout AND to the shared radius-logs volume (read by
+    # the radius-admin log viewer). tee runs off a fifo so `exec` can keep
+    # radiusd as PID 1 (docker stop signals it directly).
+    command:
+      - sh
+      - -c
+      - |
+        rm -f /tmp/log.pipe && mkfifo /tmp/log.pipe
+        tee -a /logs/radius.log < /tmp/log.pipe &
+        exec radiusd -f -l stdout > /tmp/log.pipe 2>&1
     env_file: .env
     ports:
       - "0.0.0.0:${RADIUS_AUTH_PORT:-1812}:1812/udp"
@@ -17,6 +26,10 @@ services:
       # Shared with radius-admin, which writes the generated 'authorize'
       # users file here (custom reply attributes per LDAP group).
       - radius-policy:/opt/etc/raddb/mods-config/files
+      # Server log, shared read/write with radius-admin (viewer + rotation).
+      # Deliberately not /var/log/radius: that would drag radacct into the
+      # volume.
+      - radius-logs:/logs
     restart: unless-stopped
 
   # Web admin panel: manages custom RADIUS reply attributes (Cisco /
@@ -32,6 +45,7 @@ services:
     volumes:
       - radius-policy:/radius-files
       - admin-data:/data
+      - radius-logs:/logs
     # Share the freeradius PID namespace so the admin app can SIGHUP radiusd
     # to reload the users file after changes are applied.
     pid: "container:freeradius"
@@ -44,3 +58,5 @@ volumes:
   radius-policy:
   # radius-admin rule definitions and apply state
   admin-data:
+  # radiusd log file (tee'd copy of stdout), shown in the admin panel
+  radius-logs:

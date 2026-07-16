@@ -46,6 +46,11 @@ dictionary FreeRADIUS loads.
 - Saving a rule never touches the running server until you press Apply; the
   dashboard shows a "pending changes" badge and a live preview of the
   generated file.
+- **Server log** shows the live radiusd output (the same stream as
+  `docker compose logs freeradius`) with auto-refresh — handy for watching
+  Access-Accept/Reject results while testing rules. The log file lives on a
+  shared volume, capped at `RADIUS_LOG_MAX_MB` (default 10 MB, one previous
+  generation kept).
 - The panel speaks plain HTTP; put a TLS reverse proxy in front of it for
   production.
 
@@ -73,7 +78,7 @@ filter with `sAMAccountName`, `memberOf` group membership).
 | Ports | `RADIUS_AUTH_PORT`, `RADIUS_ACCT_PORT`, `ADMIN_PORT` |
 | RADIUS clients | `RADIUS_CLIENT_IP`, `RADIUS_CLIENT_SECRET` |
 | Access policy | `RADIUS_REQUIRED_GROUP` |
-| Admin panel | `ADMIN_GROUP`, `ADMIN_SESSION_SECRET` |
+| Admin panel | `ADMIN_GROUP`, `ADMIN_SESSION_SECRET`, `RADIUS_LOG_MAX_MB` |
 | Directory connection | `LDAP_SERVER`, `LDAP_START_TLS`, `LDAP_TLS_REQUIRE_CERT`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_BASE_DN` |
 | User lookup | `LDAP_USER_BASE_DN`, `LDAP_USER_OBJECT_FILTER`, `LDAP_USER_NAME_ATTRIBUTE` |
 | Group lookup | `LDAP_GROUP_BASE_DN`, `LDAP_GROUP_OBJECT_FILTER`, `LDAP_GROUP_MEMBERSHIP_FILTER`, `LDAP_GROUP_MEMBERSHIP_ATTRIBUTE` |
