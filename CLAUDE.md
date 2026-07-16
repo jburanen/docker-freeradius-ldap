@@ -46,9 +46,11 @@ custom RADIUS reply attributes.
   Apply = rewrite file + SIGHUP radiusd via shared PID namespace
   (`pid: "container:freeradius"`). Login = LDAP bind-as-user with the same
   `LDAP_*` env vars, gated by `ADMIN_GROUP` membership (memberOf first, then
-  member/uniqueMember/memberUid group search). A "Server log" page tails
-  `/logs/radius.log` from the `radius-logs` volume (3 s auto-refresh, clear
-  button, copytruncate rotation at `RADIUS_LOG_MAX_MB`, default 10).
+  member/uniqueMember/memberUid group search). A tabbed "Logs" page tails
+  `/logs/radius.log` (radiusd, incl. rlm_ldap) and `/logs/admin.log` (the
+  panel's own logging: LDAP binds/logins/applies, via a root-logger
+  FileHandler) from the `radius-logs` volume — 3 s auto-refresh, clear
+  button, copytruncate rotation at `RADIUS_LOG_MAX_MB` (default 10) each.
   Vendor presets: Cisco
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in

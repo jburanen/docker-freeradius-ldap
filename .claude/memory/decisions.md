@@ -26,6 +26,10 @@ Volume mounts at `/logs`, not `/var/log/radius`, to keep radacct out of it.
 **Rejected alternatives:** docker.sock + logs API (root-equivalent exposure);
 `-l /path/file` only (loses docker logs); reading radiusd's stdout fd via the
 shared PID namespace (would steal data from the docker log driver).
+**Amended same day:** the page is now tabbed; radius-admin also writes its
+own log (LDAP binds/logins/applies) to `/logs/admin.log` via a root-logger
+FileHandler (append mode, so the same in-place truncate rules apply). The
+rlm_ldap side of LDAP troubleshooting is already in radius.log.
 
 ## 2026-07-15 — Custom attributes via rlm_files users file + SIGHUP
 **Decided:** The admin panel renders attribute rules (LDAP group → reply

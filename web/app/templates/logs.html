@@ -3,25 +3,41 @@
 
 <div class="card">
   <div class="row" style="align-items:center;">
-    <div><h2 style="margin:0;">FreeRADIUS server log</h2></div>
+    <div><h2 style="margin:0;">Logs</h2></div>
     <div style="flex:0; white-space:nowrap;">
       <label class="check-label"><input type="checkbox" id="autorefresh" checked> Auto-refresh</label>
-      <form class="inline" method="post" action="{{ url_for('logs_clear') }}"
-            onsubmit="return confirm('Clear the server log?');">
+      <form class="inline" method="post" action="{{ url_for('logs_clear', log_name=log_name) }}"
+            onsubmit="return confirm('Clear the {{ log_files[log_name].label }} log?');">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn small danger" type="submit">Clear log</button>
       </form>
     </div>
   </div>
+
+  <div class="tabs">
+    {% for key, info in log_files.items() %}
+    <a class="tab{{ ' active' if key == log_name }}"
+       href="{{ url_for('logs', log_name=key) }}">{{ info.label }}</a>
+    {% endfor %}
+  </div>
+
+  {% if log_name == 'freeradius' %}
   <p class="muted">Live radiusd output &mdash; the same stream as
-  <code>docker compose logs freeradius</code>. Shows the last
+  <code>docker compose logs freeradius</code>, including rlm_ldap directory
+  messages. Shows the last {{ tail_kb }}&nbsp;KB; the file is rotated once it
+  exceeds {{ max_mb }}&nbsp;MB.</p>
+  {% else %}
+  <p class="muted">The admin panel's own log &mdash; LDAP service binds, panel
+  login attempts, and rule applies; the same stream as
+  <code>docker compose logs radius-admin</code>. Shows the last
   {{ tail_kb }}&nbsp;KB; the file is rotated once it exceeds
   {{ max_mb }}&nbsp;MB.</p>
+  {% endif %}
 
   {% if log_text is none %}
-  <p class="muted">No log file yet. If the stack was just updated, recreate the
-  server so it starts writing to the shared volume:
-  <code>docker compose up -d --force-recreate freeradius radius-admin</code></p>
+  <p class="muted">No log file yet. If the stack was just updated, recreate it
+  so both containers use the shared log volume:
+  <code>docker compose up -d --build --force-recreate freeradius radius-admin</code></p>
   {% endif %}
   <pre class="preview log" id="log">{{ log_text or "" }}</pre>
 </div>
@@ -34,7 +50,7 @@ pre.scrollTop = pre.scrollHeight;  // open at the newest lines
 async function refreshLog() {
   if (!auto.checked || document.hidden) return;
   try {
-    const resp = await fetch('{{ url_for("logs_tail") }}', {cache: 'no-store'});
+    const resp = await fetch('{{ url_for("logs_tail", log_name=log_name) }}', {cache: 'no-store'});
     if (!resp.ok) return;  // e.g. session expired
     const text = await resp.text();
     const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;

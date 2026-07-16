@@ -46,11 +46,12 @@ dictionary FreeRADIUS loads.
 - Saving a rule never touches the running server until you press Apply; the
   dashboard shows a "pending changes" badge and a live preview of the
   generated file.
-- **Server log** shows the live radiusd output (the same stream as
-  `docker compose logs freeradius`) with auto-refresh — handy for watching
-  Access-Accept/Reject results while testing rules. The log file lives on a
-  shared volume, capped at `RADIUS_LOG_MAX_MB` (default 10 MB, one previous
-  generation kept).
+- **Logs** shows two live, auto-refreshing tails: the radiusd output (the
+  same stream as `docker compose logs freeradius`, including rlm_ldap
+  directory messages) — handy for watching Access-Accept/Reject results
+  while testing rules — and the panel's own LDAP log (service binds, panel
+  logins, applies). Both files live on a shared volume, each capped at
+  `RADIUS_LOG_MAX_MB` (default 10 MB, one previous generation kept).
 - The panel speaks plain HTTP; put a TLS reverse proxy in front of it for
   production.
 

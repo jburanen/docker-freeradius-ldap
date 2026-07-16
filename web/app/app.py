@@ -61,11 +61,26 @@ RULES_PATH = os.path.join(DATA_DIR, "rules.json")
 STATE_PATH = os.path.join(DATA_DIR, "state.json")
 AUTHORIZE_PATH = os.path.join(RADIUS_FILES_DIR, "authorize")
 
-# radiusd log file, tee'd from the freeradius container's stdout onto the
-# shared radius-logs volume (see docker-compose.yml).
-RADIUS_LOG_PATH = os.path.join(env("RADIUS_LOG_DIR", "/logs"), "radius.log")
+# Log files shown on the Logs page, both on the shared radius-logs volume:
+# radius.log is tee'd from the freeradius container's stdout (see
+# docker-compose.yml, includes rlm_ldap messages); admin.log is this app's
+# own logging (LDAP binds, panel logins, applies) via the handler below.
+LOG_DIR = env("RADIUS_LOG_DIR", "/logs")
+LOG_FILES = {
+    "freeradius": {"label": "FreeRADIUS", "path": os.path.join(LOG_DIR, "radius.log")},
+    "admin": {"label": "Admin panel / LDAP", "path": os.path.join(LOG_DIR, "admin.log")},
+}
 RADIUS_LOG_MAX_MB = int(env("RADIUS_LOG_MAX_MB", "10"))
 LOG_TAIL_BYTES = 64 * 1024
+
+try:
+    # Append mode (O_APPEND), so in-place truncation by rotate/clear is safe.
+    _file_handler = logging.FileHandler(LOG_FILES["admin"]["path"])
+    _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(_file_handler)
+except OSError as _exc:
+    log.warning("cannot open %s: %s -- admin log page will be empty",
+                LOG_FILES["admin"]["path"], _exc)
 
 ATTR_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 UNQUOTED_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -220,13 +235,13 @@ def reload_freeradius():
 
 
 # ---------------------------------------------------------------------------
-# radiusd log viewing (shared radius-logs volume)
+# Log viewing (shared radius-logs volume)
 # ---------------------------------------------------------------------------
 
-def read_log_tail():
-    """Last LOG_TAIL_BYTES of the radiusd log, or None if there is no file."""
+def read_log_tail(path):
+    """Last LOG_TAIL_BYTES of a log file, or None if there is no file."""
     try:
-        with open(RADIUS_LOG_PATH, "rb") as f:
+        with open(path, "rb") as f:
             size = f.seek(0, os.SEEK_END)
             f.seek(max(0, size - LOG_TAIL_BYTES))
             data = f.read()
@@ -238,20 +253,21 @@ def read_log_tail():
     return text
 
 
-def rotate_log_if_needed():
-    """Cap the log at RADIUS_LOG_MAX_MB, keeping one previous generation.
+def rotate_log_if_needed(path):
+    """Cap a log at RADIUS_LOG_MAX_MB, keeping one previous generation.
 
-    tee holds an O_APPEND fd on the file, so it must be truncated in place --
-    replacing the file would leave tee appending to an orphaned inode. Lines
+    Both writers (tee for radius.log, the FileHandler for admin.log) hold an
+    O_APPEND fd on the file, so it must be truncated in place -- replacing
+    the file would leave the writer appending to an orphaned inode. Lines
     written between the copy and the truncate are lost, the same trade-off
     as logrotate's copytruncate.
     """
     try:
-        if os.path.getsize(RADIUS_LOG_PATH) <= RADIUS_LOG_MAX_MB * 1024 * 1024:
+        if os.path.getsize(path) <= RADIUS_LOG_MAX_MB * 1024 * 1024:
             return
-        shutil.copyfile(RADIUS_LOG_PATH, RADIUS_LOG_PATH + ".1")
-        os.truncate(RADIUS_LOG_PATH, 0)
-        log.info("rotated %s (> %d MB)", RADIUS_LOG_PATH, RADIUS_LOG_MAX_MB)
+        shutil.copyfile(path, path + ".1")
+        os.truncate(path, 0)
+        log.info("rotated %s (> %d MB)", path, RADIUS_LOG_MAX_MB)
     except OSError as exc:
         log.warning("log rotation failed: %s", exc)
 
@@ -559,36 +575,53 @@ def apply():
     return redirect(url_for("index"))
 
 
+def log_file_or_404(log_name):
+    if log_name not in LOG_FILES:
+        abort(404)
+    return LOG_FILES[log_name]
+
+
 @app.route("/logs")
 @login_required
-def logs():
-    rotate_log_if_needed()
+def logs_index():
+    return redirect(url_for("logs", log_name="freeradius"))
+
+
+@app.route("/logs/<log_name>")
+@login_required
+def logs(log_name):
+    info = log_file_or_404(log_name)
+    rotate_log_if_needed(info["path"])
     return render_template(
         "logs.html",
-        log_text=read_log_tail(),
+        log_name=log_name,
+        log_files=LOG_FILES,
+        log_text=read_log_tail(info["path"]),
         tail_kb=LOG_TAIL_BYTES // 1024,
         max_mb=RADIUS_LOG_MAX_MB,
     )
 
 
-@app.get("/logs/tail")
+@app.get("/logs/<log_name>/tail")
 @login_required
-def logs_tail():
+def logs_tail(log_name):
     # Polled by the auto-refresh script on the logs page.
-    text = read_log_tail()
+    text = read_log_tail(log_file_or_404(log_name)["path"])
     return (text or "", {"Content-Type": "text/plain; charset=utf-8"})
 
 
-@app.post("/logs/clear")
+@app.post("/logs/<log_name>/clear")
 @login_required
-def logs_clear():
+def logs_clear(log_name):
+    info = log_file_or_404(log_name)
     try:
-        os.truncate(RADIUS_LOG_PATH, 0)  # in place: tee keeps its O_APPEND fd
-        log.info("log cleared by %s", session.get("user"))
-        flash("Server log cleared.", "ok")
+        # In place: the writer (tee / FileHandler) keeps its O_APPEND fd.
+        os.truncate(info["path"], 0)
+        log.info("%s log cleared by %s", log_name, session.get("user"))
+        flash(f"{info['label']} log cleared.", "ok")
     except OSError as exc:
         flash(f"Could not clear the log: {exc}", "error")
-    return redirect(url_for("logs"))
+    return redirect(url_for("logs", log_name=log_name))
 
 
 # ---------------------------------------------------------------------------
