@@ -33,6 +33,8 @@ services:
       # Deliberately not /var/log/radius: that would drag radacct into the
       # volume.
       - radius-logs:/logs
+      # Log/panel timestamps in the Docker host's timezone (Linux hosts).
+      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
 
   # Web admin panel: manages custom RADIUS reply attributes (Cisco /
@@ -53,6 +55,7 @@ services:
       - radius-policy:/radius-files
       - admin-data:/data
       - radius-logs:/logs
+      - /etc/localtime:/etc/localtime:ro
     # Share the freeradius PID namespace so the admin app can SIGHUP radiusd
     # to reload the users file after changes are applied.
     pid: "container:freeradius"

@@ -54,7 +54,7 @@
       {% endif %}
       <td>
         {% if not s.error %}
-        {% set applied_info %}Last applied: {{ s.state.applied_at or "never" }}{% if s.state.applied_by %} by {{ s.state.applied_by }}{% endif %}{% endset %}
+        {% set applied_info %}Last applied: {{ s.state.applied_at|localtime }}{% if s.state.applied_by %} by {{ s.state.applied_by }}{% endif %}{% endset %}
         {% if s.rules_hash == local_hash %}
         <span class="badge applied" title="{{ applied_info }}">matching</span>
         {% else %}
@@ -63,7 +63,7 @@
         {% endif %}
         {% if p.url in pending %}
         <span class="badge pending">apply queued</span>
-        <span class="muted">since {{ pending[p.url].queued_at }} by
+        <span class="muted">since {{ pending[p.url].queued_at|localtime }} by
           {{ pending[p.url].applied_by }}</span>
         {% endif %}
       </td>

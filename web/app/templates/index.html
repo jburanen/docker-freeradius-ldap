@@ -51,16 +51,15 @@
 </div>
 
 <div class="card">
-  <h2>Apply to FreeRADIUS
-    {% if pending %}<span class="badge pending">pending changes</span>
-    {% else %}<span class="badge applied">in sync</span>{% endif %}
-  </h2>
   <div class="apply-layout">
     <div class="preview-col">
-      <h2>Generated users file preview</h2>
+      <h2>Apply to FreeRADIUS
+        {% if pending %}<span class="badge pending">pending changes</span>
+        {% else %}<span class="badge applied">in sync</span>{% endif %}
+      </h2>
       <pre class="preview">{{ preview }}</pre>
       {% if state.applied_at %}
-      <p class="muted">Last applied {{ state.applied_at }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
+      <p class="muted">Last applied {{ state.applied_at|localtime }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
       {% endif %}
     </div>
     <div class="apply-side">

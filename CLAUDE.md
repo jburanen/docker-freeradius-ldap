@@ -109,6 +109,10 @@ custom RADIUS reply attributes.
   requirement for all devices — that's why the default is explicit.
 - Compose fails fast if `.env` is missing (`env_file` is required) — that's
   intentional, it forces `cp .env.example .env`.
+- Timestamps are stored/exchanged as ISO-8601 UTC (state.json, pending.json,
+  cluster API) and only converted for display by the `|localtime` Jinja
+  filter. Both containers mount `/etc/localtime:ro` from the (Linux) host so
+  rendered stamps and log lines follow the host timezone.
 - Cluster sync is deliberately last-apply-wins full replacement of
   rules.json — no merging, no conflict detection. Concurrent edits on two
   panels are resolved by whichever admin applies last. Peer removal is

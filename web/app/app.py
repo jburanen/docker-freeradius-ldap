@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.1.3"
+ADMIN_VERSION = "1.1.4"
 
 
 def env(name, default=None, required=False):
@@ -667,6 +667,20 @@ def csrf_token():
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+@app.template_filter("localtime")
+def format_localtime(iso_ts):
+    """Render a stored ISO-8601 UTC stamp in the host's timezone (the
+    containers mount /etc/localtime). Stamps stay UTC on disk and on the
+    cluster API; peers' stamps are converted by the viewing instance."""
+    if not iso_ts:
+        return "never"
+    try:
+        dt = datetime.fromisoformat(str(iso_ts))
+    except ValueError:
+        return iso_ts
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 @app.context_processor
