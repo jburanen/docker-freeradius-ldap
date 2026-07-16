@@ -58,7 +58,18 @@ custom RADIUS reply attributes.
   with the panel's own LDAP logins/binds/applies via a root-logger
   FileHandler, `radius-admin:` prefix) from the `radius-logs` volume —
   3 s auto-refresh, clear button, copytruncate rotation at
-  `RADIUS_LOG_MAX_MB` (default 10) each. A login-gated footer shows
+  `RADIUS_LOG_MAX_MB` (default 10) each. Clustering (optional, enabled by a
+  shared `CLUSTER_SECRET`): peers registered by URL on the Cluster page
+  (mutual registration + one-hop list propagation = full mesh from one
+  action; peers.json in admin-data), Apply box multi-selects target
+  instances, remote applies POST the full ruleset to
+  `/api/cluster/{status,register,peers,apply}` — JSON signed with
+  HMAC-SHA256 over "ts.body" (±5 min window, CSRF-exempt, stdlib urllib
+  with proxies disabled), receiver validates/saves rules, rewrites
+  authorize, HUPs its own radiusd. Applies to unreachable members queue in
+  pending.json on the origin (newest per peer) and a daemon thread retries
+  every 60 s; every apply carries config_ts so receivers 409 stale queued
+  deliveries superseded by a newer direct apply. A login-gated footer shows
   `ADMIN_VERSION` and the running FreeRADIUS version, found by regex-scanning
   the radiusd binary / libfreeradius-server.so through `/proc/<pid>` in the
   shared PID namespace (cached per radiusd pid; the compiled-in version
@@ -98,6 +109,10 @@ custom RADIUS reply attributes.
   requirement for all devices — that's why the default is explicit.
 - Compose fails fast if `.env` is missing (`env_file` is required) — that's
   intentional, it forces `cp .env.example .env`.
+- Cluster sync is deliberately last-apply-wins full replacement of
+  rules.json — no merging, no conflict detection. Concurrent edits on two
+  panels are resolved by whichever admin applies last. Peer removal is
+  local-only (each instance owns its peers.json).
 - tee holds an O_APPEND fd on `/logs/radius.log` and the panel's FileHandler
   one on `/logs/auth.log`, so radius-admin must rotate and clear them with
   in-place `os.truncate` — never `os.replace`, which would leave the writer

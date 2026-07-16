@@ -47,6 +47,8 @@ pre.preview.log { max-height:65vh; overflow:auto; }
 .tabs .tab:hover { text-decoration:none; border-color:#b9c2cc; }
 .tabs .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
 .check-label { display:inline; color:var(--muted); font-size:.85rem; margin-right:.6rem; }
+.targets { margin-bottom:.6rem; }
+.targets label { display:block; margin:.1rem 0; font-size:.85rem; color:var(--ink); white-space:nowrap; }
 header nav a { color:#9fb0c3; font-size:.9rem; margin-right:.8rem; }
 header nav a:hover { color:#fff; text-decoration:none; }
 label { display:block; font-size:.85rem; color:var(--muted); margin:.7rem 0 .2rem; }
@@ -69,6 +71,7 @@ footer a:hover { color:var(--accent); }
   <nav>
     <a href="{{ url_for('index') }}">Rules</a>
     <a href="{{ url_for('logs', log_name='freeradius') }}">Logs</a>
+    <a href="{{ url_for('cluster') }}">Cluster</a>
   </nav>
   {% endif %}
   <div class="spacer"></div>

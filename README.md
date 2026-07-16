@@ -57,6 +57,36 @@ dictionary FreeRADIUS loads.
 - The panel speaks plain HTTP; put a TLS reverse proxy in front of it for
   production.
 
+## Clustering (redundant deployments)
+
+Deploy the stack on two or more hosts and join them into a cluster: log in
+to **any** instance's panel and apply the ruleset to all of them — or
+multi-select which instances receive it — in one click.
+
+1. In each instance's `.env`, set the **same** `CLUSTER_SECRET`, a friendly
+   `CLUSTER_NODE_NAME`, and `CLUSTER_NODE_URL` (that panel's address as the
+   other instances reach it), then `docker compose up -d --build radius-admin`.
+2. On the new instance's **Cluster** page, register the URL of any existing
+   member (or vice versa). Registration is mutual and the member list is
+   shared, so one action joins the full mesh.
+3. The dashboard's Apply box then lists every instance with checkboxes
+   (all selected by default).
+
+Notes: instance-to-instance calls are HMAC-signed with `CLUSTER_SECRET`
+(the secret is never transmitted; clocks must agree within 5 minutes).
+Rules are pushed as a full replacement — the last apply wins. Each instance
+still authenticates panel logins against its own LDAP settings, and the
+Cluster page shows reachability, version, and whether each member's rules
+match the instance you're looking at.
+
+If a targeted instance is **offline during an apply**, the apply is queued
+on the instance you used and retried every 60 seconds until the member is
+back — it catches up automatically. Every apply carries a timestamp, so a
+queued (older) delivery is discarded if a newer apply already reached the
+member directly. Queued deliveries are shown on the Cluster page, where
+they can also be cancelled. The queue lives on the originating instance:
+if that instance is itself down, delivery resumes when it returns.
+
 ## How it works
 
 - **freeradius** runs the official `freeradius/freeradius-server` image.
@@ -83,6 +113,7 @@ filter with `sAMAccountName`, `memberOf` group membership).
 | RADIUS clients | `RADIUS_CLIENT_IP`, `RADIUS_CLIENT_SECRET` |
 | Access policy | `RADIUS_REQUIRED_GROUP` |
 | Admin panel | `ADMIN_GROUP`, `ADMIN_SESSION_SECRET`, `RADIUS_LOG_MAX_MB` |
+| Cluster | `CLUSTER_SECRET`, `CLUSTER_NODE_NAME`, `CLUSTER_NODE_URL` |
 | Directory connection | `LDAP_SERVER`, `LDAP_START_TLS`, `LDAP_TLS_REQUIRE_CERT`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_BASE_DN` |
 | User lookup | `LDAP_USER_BASE_DN`, `LDAP_USER_OBJECT_FILTER`, `LDAP_USER_NAME_ATTRIBUTE` |
 | Group lookup | `LDAP_GROUP_BASE_DN`, `LDAP_GROUP_OBJECT_FILTER`, `LDAP_GROUP_MEMBERSHIP_FILTER`, `LDAP_GROUP_MEMBERSHIP_ATTRIBUTE` |

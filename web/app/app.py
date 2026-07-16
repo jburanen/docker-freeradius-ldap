@@ -13,6 +13,7 @@ membership in the ADMIN_GROUP group.
 
 import glob
 import hashlib
+import hmac
 import ipaddress
 import json
 import logging
@@ -21,8 +22,12 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import ssl
+import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
@@ -37,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.0.1"
+ADMIN_VERSION = "1.1.0"
 
 
 def env(name, default=None, required=False):
@@ -63,7 +68,19 @@ DATA_DIR = env("ADMIN_DATA_DIR", "/data")
 RADIUS_FILES_DIR = env("RADIUS_FILES_DIR", "/radius-files")
 RULES_PATH = os.path.join(DATA_DIR, "rules.json")
 STATE_PATH = os.path.join(DATA_DIR, "state.json")
+PEERS_PATH = os.path.join(DATA_DIR, "peers.json")
+PENDING_PATH = os.path.join(DATA_DIR, "pending.json")
 AUTHORIZE_PATH = os.path.join(RADIUS_FILES_DIR, "authorize")
+
+# Cluster: several deployments of this stack can be registered with each
+# other and applied to together. All instances must share CLUSTER_SECRET
+# (empty disables clustering and its API); CLUSTER_NODE_URL is how the
+# other panels reach this one.
+CLUSTER_SECRET = env("CLUSTER_SECRET", "")
+CLUSTER_NODE_NAME = env("CLUSTER_NODE_NAME", "") or socket.gethostname()
+CLUSTER_NODE_URL = (env("CLUSTER_NODE_URL", "") or "").strip().rstrip("/")
+CLUSTER_TIMEOUT = 6
+PENDING_RETRY_SECONDS = 60
 
 # Log files shown on the Logs page, both on the shared radius-logs volume:
 # radius.log is tee'd from the freeradius container's stdout (see
@@ -297,6 +314,217 @@ def freeradius_version():
 
 
 # ---------------------------------------------------------------------------
+# Cluster (multi-instance sync)
+# ---------------------------------------------------------------------------
+# Every instance runs this same app against its own freeradius. Peers are
+# registered by URL; server-to-server calls are JSON POSTs signed with
+# HMAC-SHA256 over "<unix ts>.<body>" so the shared secret never travels
+# (5-minute freshness window). Apply pushes the full ruleset -- last apply
+# wins, there is no merging.
+
+def load_peers():
+    return load_json(PEERS_PATH, {"peers": []})["peers"]
+
+
+def save_peers(peers):
+    atomic_write(PEERS_PATH, json.dumps({"peers": peers}, indent=2))
+
+
+def normalize_url(url):
+    return (url or "").strip().rstrip("/")
+
+
+def merge_peers(new_entries):
+    """Add unknown instances (keyed by URL, never self) to the peer list."""
+    peers = load_peers()
+    known = {p["url"] for p in peers} | {CLUSTER_NODE_URL}
+    changed = False
+    for entry in new_entries:
+        url = normalize_url(entry.get("url"))
+        if not url.startswith(("http://", "https://")) or url in known:
+            continue
+        peers.append({"name": str(entry.get("name") or url), "url": url})
+        known.add(url)
+        changed = True
+    if changed:
+        save_peers(peers)
+    return peers
+
+
+def cluster_sign(timestamp, body):
+    return hmac.new(CLUSTER_SECRET.encode(),
+                    f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
+
+
+class ClusterError(Exception):
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status  # HTTP status if the peer answered, else None
+
+
+# Peer calls go to other instances directly, never through a proxy.
+_cluster_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def cluster_call(base_url, endpoint, payload, timeout=CLUSTER_TIMEOUT):
+    body = json.dumps(payload).encode()
+    ts = str(int(time.time()))
+    req = urllib.request.Request(
+        normalize_url(base_url) + endpoint,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Cluster-Timestamp": ts,
+            "X-Cluster-Signature": cluster_sign(ts, body),
+        },
+    )
+    try:
+        with _cluster_opener.open(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            raise ClusterError("signature refused -- do both instances share "
+                               "CLUSTER_SECRET, and are their clocks in sync?",
+                               status=403) from exc
+        if exc.code == 404:
+            raise ClusterError("no cluster API there -- is it radius-admin "
+                               ">= 1.1 with CLUSTER_SECRET set?",
+                               status=404) from exc
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("message", "")
+        except (ValueError, OSError, AttributeError):
+            detail = ""
+        raise ClusterError(detail or f"HTTP {exc.code}", status=exc.code) from exc
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        raise ClusterError(str(getattr(exc, "reason", exc))) from exc
+
+
+def cluster_api(view):
+    """Auth for the server-to-server endpoints (HMAC, not the login session)."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not CLUSTER_SECRET:
+            abort(404)
+        ts = request.headers.get("X-Cluster-Timestamp", "")
+        sig = request.headers.get("X-Cluster-Signature", "")
+        if not ts.isdigit() or abs(time.time() - int(ts)) > 300:
+            abort(403)
+        if not hmac.compare_digest(cluster_sign(ts, request.get_data()), sig):
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def validate_rules_payload(rules):
+    """Structural check of a pushed ruleset; returns an error string or None."""
+    if not isinstance(rules, list):
+        return "rules must be a list"
+    for rule in rules:
+        if not isinstance(rule, dict):
+            return "rule entries must be objects"
+        name = str(rule.get("name", "")).strip()
+        if not name or not str(rule.get("ldap_group", "")).strip():
+            return "every rule needs a name and an LDAP group"
+        if rule.get("nas_ip"):
+            try:
+                ipaddress.ip_address(rule["nas_ip"])
+            except ValueError:
+                return f"invalid NAS IP in rule {name!r}"
+        attrs = rule.get("attributes")
+        if not isinstance(attrs, list) or not attrs:
+            return f"rule {name!r} has no attributes"
+        for a in attrs:
+            if not isinstance(a, dict) or not ATTR_NAME_RE.fullmatch(str(a.get("attr", ""))):
+                return f"invalid attribute name in rule {name!r}"
+            if a.get("op") not in OPERATORS:
+                return f"invalid operator in rule {name!r}"
+            value = a.get("value")
+            if not isinstance(value, str) or not value or "\n" in value or "\r" in value:
+                return f"invalid attribute value in rule {name!r}"
+        rule.setdefault("id", uuid.uuid4().hex[:12])
+        rule["enabled"] = bool(rule.get("enabled", True))
+    return None
+
+
+def apply_rules_locally(rules, applied_by, config_ts=None):
+    """Write the users file, HUP radiusd, record state. Shared by the local
+    Apply path and the cluster API. config_ts is the wall-clock time of the
+    originating admin action, used to order applies across the cluster."""
+    write_authorize(rules)
+    ok, message = reload_freeradius()
+    save_state({
+        "applied_hash": rendered_hash(rules) if ok else None,
+        "applied_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "applied_by": applied_by,
+        "result": message,
+        "config_ts": config_ts or time.time(),
+    })
+    return ok, message
+
+
+# --- Pending deliveries: applies that targeted an unreachable instance ---
+# Queued on the originating instance (newest ruleset per peer wins) and
+# retried in the background until delivered, so a member that was down
+# catches up automatically. The receiver's config_ts check drops a queued
+# ruleset that has been superseded by a newer apply in the meantime.
+
+_pending_lock = threading.Lock()
+
+
+def load_pending():
+    return load_json(PENDING_PATH, {"pending": {}})["pending"]
+
+
+def queue_pending(url, rules, applied_by, config_ts):
+    with _pending_lock:
+        pending = load_pending()
+        pending[url] = {
+            "rules": rules,
+            "applied_by": applied_by,
+            "config_ts": config_ts,
+            "queued_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        atomic_write(PENDING_PATH, json.dumps({"pending": pending}, indent=2))
+
+
+def clear_pending(url):
+    with _pending_lock:
+        pending = load_pending()
+        if url in pending:
+            del pending[url]
+            atomic_write(PENDING_PATH, json.dumps({"pending": pending}, indent=2))
+
+
+def pending_retry_loop():
+    while True:
+        time.sleep(PENDING_RETRY_SECONDS)
+        try:
+            peer_urls = {p["url"] for p in load_peers()}
+            for url, entry in list(load_pending().items()):
+                if url not in peer_urls:  # peer was removed meanwhile
+                    clear_pending(url)
+                    continue
+                try:
+                    resp = cluster_call(url, "/api/cluster/apply", {
+                        "rules": entry["rules"],
+                        "applied_by": entry["applied_by"],
+                        "config_ts": entry["config_ts"],
+                    })
+                except ClusterError as exc:
+                    if exc.status in (400, 409):
+                        # Rejected for good: invalid, or superseded by a
+                        # newer apply that already reached the peer.
+                        clear_pending(url)
+                        log.info("dropped queued apply for %s: %s", url, exc)
+                    continue
+                clear_pending(url)
+                log.info("delivered queued apply to %s: %s", url,
+                         resp.get("message"))
+        except Exception:
+            log.exception("pending delivery loop error")
+
+
+# ---------------------------------------------------------------------------
 # Log viewing (shared radius-logs volume)
 # ---------------------------------------------------------------------------
 
@@ -453,9 +681,12 @@ def inject_versions():
 
 @app.before_request
 def csrf_protect():
+    if request.path.startswith("/api/"):
+        return None  # server-to-server endpoints authenticate via HMAC
     if request.method == "POST":
         if request.form.get("_csrf") != session.get("_csrf"):
             abort(400, "CSRF token mismatch -- reload the page and try again.")
+    return None
 
 
 def login_required(view):
@@ -565,6 +796,8 @@ def index():
         preview=render_users_file(rules),
         state=load_state(),
         pending=pending_changes(rules),
+        peers=load_peers(),
+        node_name=CLUSTER_NODE_NAME,
     )
 
 
@@ -634,18 +867,195 @@ def rule_toggle(rule_id):
 @login_required
 def apply():
     rules = load_rules()
-    write_authorize(rules)
-    ok, message = reload_freeradius()
-    state = {
-        "applied_hash": rendered_hash(rules) if ok else None,
-        "applied_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "applied_by": session.get("user"),
-        "result": message,
-    }
-    save_state(state)
-    log.info("apply by %s: %s", session.get("user"), message)
-    flash(message, "ok" if ok else "error")
+    user = session.get("user")
+    peers = load_peers()
+    targets = request.form.getlist("target")
+    if request.form.get("has_targets"):
+        if not targets:
+            flash("Select at least one instance to apply to.", "error")
+            return redirect(url_for("index"))
+    else:
+        targets = ["local"]  # no cluster configured: original behavior
+
+    config_ts = time.time()  # orders this apply across the cluster
+    if "local" in targets:
+        ok, message = apply_rules_locally(rules, user, config_ts)
+        log.info("apply by %s: %s", user, message)
+        # Only name the instance when there is a cluster to disambiguate.
+        flash(f"{CLUSTER_NODE_NAME}: {message}" if peers else message,
+              "ok" if ok else "error")
+
+    applied_by = f"{user} (via {CLUSTER_NODE_NAME})"
+    for peer in peers:
+        if peer["url"] not in targets:
+            continue
+        try:
+            resp = cluster_call(peer["url"], "/api/cluster/apply",
+                                {"rules": rules, "applied_by": applied_by,
+                                 "config_ts": config_ts})
+            ok = bool(resp.get("ok"))
+            message = resp.get("message", "no response detail")
+            clear_pending(peer["url"])  # this apply supersedes anything queued
+        except ClusterError as exc:
+            if exc.status in (400, 409):  # rejected, retrying won't help
+                ok, message = False, str(exc)
+            else:
+                queue_pending(peer["url"], rules, applied_by, config_ts)
+                log.info("cluster apply to %s failed (%s); queued for retry",
+                         peer["url"], exc)
+                flash(f"{peer['name']}: unreachable ({exc}) -- apply queued, "
+                      f"it will be delivered automatically when the instance "
+                      f"is back (retried every {PENDING_RETRY_SECONDS} s).",
+                      "info")
+                continue
+        log.info("cluster apply to %s by %s: %s", peer["url"], user, message)
+        flash(f"{peer['name']}: {message}", "ok" if ok else "error")
     return redirect(url_for("index"))
+
+
+# --- Cluster UI ---
+
+@app.route("/cluster")
+@login_required
+def cluster():
+    peers = load_peers()
+    statuses = {}
+    for peer in peers:
+        try:
+            statuses[peer["url"]] = cluster_call(
+                peer["url"], "/api/cluster/status", {}, timeout=4)
+        except ClusterError as exc:
+            statuses[peer["url"]] = {"error": str(exc)}
+    return render_template(
+        "cluster.html",
+        peers=peers,
+        statuses=statuses,
+        pending=load_pending(),
+        local_hash=rendered_hash(load_rules()),
+        node_name=CLUSTER_NODE_NAME,
+        node_url=CLUSTER_NODE_URL,
+        cluster_enabled=bool(CLUSTER_SECRET),
+    )
+
+
+@app.post("/cluster/add")
+@login_required
+def cluster_add():
+    if not CLUSTER_SECRET or not CLUSTER_NODE_URL:
+        flash("Set CLUSTER_SECRET and CLUSTER_NODE_URL in .env on every "
+              "instance first (see .env.example).", "error")
+        return redirect(url_for("cluster"))
+    url = normalize_url(request.form.get("url", ""))
+    if not url.startswith(("http://", "https://")):
+        flash("Instance URL must start with http:// or https://.", "error")
+        return redirect(url_for("cluster"))
+    if url == CLUSTER_NODE_URL:
+        flash("That is this instance's own URL.", "error")
+        return redirect(url_for("cluster"))
+    try:
+        resp = cluster_call(url, "/api/cluster/register",
+                            {"name": CLUSTER_NODE_NAME, "url": CLUSTER_NODE_URL,
+                             "peers": load_peers()})
+    except ClusterError as exc:
+        flash(f"Could not register with {url}: {exc}", "error")
+        return redirect(url_for("cluster"))
+    merge_peers([{"name": resp.get("name"), "url": url}]
+                + [e for e in resp.get("peers", []) if isinstance(e, dict)])
+    # One-hop propagation so every member ends up with the full list.
+    peers = load_peers()
+    full_list = peers + [{"name": CLUSTER_NODE_NAME, "url": CLUSTER_NODE_URL}]
+    for peer in peers:
+        try:
+            cluster_call(peer["url"], "/api/cluster/peers", {"peers": full_list})
+        except ClusterError as exc:
+            flash(f"{peer['name']}: could not sync the instance list ({exc})", "error")
+    log.info("cluster: registered with %s (%s)", resp.get("name"), url)
+    flash(f"Registered with {resp.get('name') or url}.", "ok")
+    return redirect(url_for("cluster"))
+
+
+@app.post("/cluster/remove")
+@login_required
+def cluster_remove():
+    url = normalize_url(request.form.get("url", ""))
+    save_peers([p for p in load_peers() if p["url"] != url])
+    clear_pending(url)
+    log.info("cluster: removed peer %s", url)
+    flash("Instance removed from this instance's list (other instances keep "
+          "their own lists).", "ok")
+    return redirect(url_for("cluster"))
+
+
+@app.post("/cluster/pending/cancel")
+@login_required
+def cluster_pending_cancel():
+    url = normalize_url(request.form.get("url", ""))
+    clear_pending(url)
+    log.info("cluster: cancelled queued apply for %s by %s",
+             url, session.get("user"))
+    flash("Queued apply cancelled.", "ok")
+    return redirect(url_for("cluster"))
+
+
+# --- Cluster server-to-server API (HMAC-authenticated, no login session) ---
+
+@app.post("/api/cluster/status")
+@cluster_api
+def api_cluster_status():
+    return {
+        "name": CLUSTER_NODE_NAME,
+        "url": CLUSTER_NODE_URL,
+        "version": ADMIN_VERSION,
+        "rules_hash": rendered_hash(load_rules()),
+        "state": load_state(),
+        "peers": load_peers(),
+    }
+
+
+@app.post("/api/cluster/register")
+@cluster_api
+def api_cluster_register():
+    data = request.get_json(silent=True) or {}
+    entries = [{"name": data.get("name"), "url": data.get("url")}]
+    entries += [e for e in data.get("peers", []) if isinstance(e, dict)]
+    merge_peers(entries)
+    log.info("cluster: instance %s (%s) registered here",
+             data.get("name"), data.get("url"))
+    return {"name": CLUSTER_NODE_NAME, "url": CLUSTER_NODE_URL,
+            "peers": load_peers()}
+
+
+@app.post("/api/cluster/peers")
+@cluster_api
+def api_cluster_peers():
+    data = request.get_json(silent=True) or {}
+    merge_peers([e for e in data.get("peers", []) if isinstance(e, dict)])
+    return {"ok": True}
+
+
+@app.post("/api/cluster/apply")
+@cluster_api
+def api_cluster_apply():
+    data = request.get_json(silent=True) or {}
+    rules = data.get("rules")
+    error = validate_rules_payload(rules)
+    if error:
+        log.warning("cluster apply rejected: %s", error)
+        return {"ok": False, "message": f"ruleset rejected: {error}"}, 400
+    try:
+        incoming_ts = float(data.get("config_ts") or 0)
+    except (TypeError, ValueError):
+        incoming_ts = 0
+    current_ts = float(load_state().get("config_ts") or 0)
+    if incoming_ts and incoming_ts < current_ts:
+        # A queued (catch-up) delivery arriving after a newer direct apply.
+        return {"ok": False, "message": "stale ruleset -- a newer apply "
+                                        "already reached this instance"}, 409
+    save_rules(rules)
+    applied_by = str(data.get("applied_by") or "cluster peer")
+    ok, message = apply_rules_locally(rules, applied_by, incoming_ts or None)
+    log.info("cluster apply from %s: %s", applied_by, message)
+    return {"ok": ok, "message": message}
 
 
 def log_file_or_404(log_name):
@@ -708,6 +1118,10 @@ def startup():
         write_authorize(load_rules())
     except OSError as exc:
         log.warning("could not write %s at startup: %s", AUTHORIZE_PATH, exc)
+    if CLUSTER_SECRET:
+        # Delivers applies that targeted an instance while it was offline.
+        threading.Thread(target=pending_retry_loop, daemon=True,
+                         name="pending-retry").start()
 
 
 if __name__ == "__main__":

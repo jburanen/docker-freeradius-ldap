@@ -61,6 +61,17 @@
     <div style="flex:0;">
       <form method="post" action="{{ url_for('apply') }}">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        {% if peers %}
+        <input type="hidden" name="has_targets" value="1">
+        <div class="targets">
+          <label><input type="checkbox" name="target" value="local" checked>
+            {{ node_name }} <span class="muted">(this instance)</span></label>
+          {% for p in peers %}
+          <label><input type="checkbox" name="target" value="{{ p.url }}" checked>
+            {{ p.name }}</label>
+          {% endfor %}
+        </div>
+        {% endif %}
         <button class="btn primary" type="submit">Apply &amp; reload</button>
       </form>
     </div>

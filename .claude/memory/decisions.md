@@ -13,6 +13,38 @@ rejected.
 **Rejected alternatives:** ...
 ```
 
+## 2026-07-16 — Clustering: HMAC-signed peer API, full-ruleset push, mesh via one-hop merge
+**Decided:** Multiple deployments cluster through radius-admin itself. Peers
+live in /data/peers.json (name+URL). Server-to-server calls are JSON POSTs
+signed HMAC-SHA256 over "unix_ts.body" with a shared CLUSTER_SECRET (never
+transmitted; ±5 min window; endpoints 404 when the secret is unset and are
+CSRF-exempt). Apply multi-selects targets; remote targets get the FULL
+ruleset (validated structurally, then save + render + HUP on the receiver)
+— last apply wins, no merging. Registration is mutual (register endpoint
+adds the caller and returns its own list) plus a one-hop /api/cluster/peers
+push of the merged list to all members, so registering one member joins the
+mesh. Peer removal is local-only. HTTP client is stdlib urllib with
+ProxyHandler({}) so http_proxy env never hijacks peer calls. Node identity
+from CLUSTER_NODE_NAME/CLUSTER_NODE_URL in .env.
+**Why:** No new services or deps; works with the existing per-instance
+LDAP login; "log in anywhere, apply everywhere" with per-instance
+multi-select was the requirement.
+**Rejected alternatives:** shared database / config replication daemon
+(new service, conflicts with compose-only constraint); rsync/scp of
+rules.json (no HUP, no auth); making one node a master (defeats redundancy
+— any panel must be usable when others are down); bearer-token auth
+(secret would cross plain HTTP).
+**Amended same day — offline members catch up:** applies that can't reach a
+targeted member queue in /data/pending.json on the ORIGIN (newest ruleset
+per peer wins) and a daemon thread retries every 60 s. Chosen over
+pull-on-startup by the returning member because only the origin knows the
+apply's intent — a later apply that deliberately excluded that member must
+NOT reach it. Ordering: every apply carries config_ts (wall clock, NTP
+assumed — same trust as the HMAC window); receivers 409 anything older than
+their current config_ts, and the origin drops queued entries on 400/409.
+Limitation (documented): if the origin is down too, delivery waits for the
+origin's return.
+
 ## 2026-07-16 — Footer FreeRADIUS version probed via /proc/<pid>/root
 **Decided:** The panel footer shows `ADMIN_VERSION` (constant in app.py,
 bump on panel changes) and the running FreeRADIUS version, read through the

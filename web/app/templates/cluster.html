@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>This instance</h2>
+  <table>
+    <tr><th>Name</th><th>URL</th><th>Clustering</th></tr>
+    <tr>
+      <td>{{ node_name }}</td>
+      <td>{{ node_url or "CLUSTER_NODE_URL not set" }}</td>
+      <td>
+        {% if cluster_enabled %}<span class="badge applied">enabled</span>
+        {% else %}<span class="badge off">disabled</span>{% endif %}
+      </td>
+    </tr>
+  </table>
+  {% if not cluster_enabled or not node_url %}
+  <p class="muted">To cluster several deployments of this stack, set in each
+  instance's <code>.env</code>: the <strong>same</strong>
+  <code>CLUSTER_SECRET</code> on all of them, a friendly
+  <code>CLUSTER_NODE_NAME</code>, and <code>CLUSTER_NODE_URL</code> (this
+  panel's address as the <em>other</em> instances reach it). Then recreate
+  radius-admin and register any existing member below.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Cluster instances</h2>
+  <p class="muted">Rules are pushed from the dashboard's Apply box &mdash;
+  select which instances receive the ruleset there. Each instance keeps its
+  own copy; the last apply wins. An apply that cannot reach an instance is
+  queued and retried automatically until it comes back (unless a newer apply
+  reaches it first). Registering one existing member joins the whole cluster
+  (instance lists are merged and shared).</p>
+
+  {% if peers %}
+  <table>
+    <tr><th>Instance</th><th>URL</th><th>Version</th><th>Last applied</th><th>Rules</th><th></th></tr>
+    {% for p in peers %}
+    {% set s = statuses[p.url] %}
+    <tr>
+      <td>{{ s.name or p.name }}</td>
+      <td>{{ p.url }}</td>
+      {% if s.error %}
+      <td colspan="2"><span class="badge off">unreachable</span>
+          <span class="muted">{{ s.error }}</span></td>
+      {% else %}
+      <td>v{{ s.version }}</td>
+      <td class="muted">{{ s.state.applied_at or "never" }}
+          {% if s.state.applied_by %}by {{ s.state.applied_by }}{% endif %}</td>
+      {% endif %}
+      <td>
+        {% if not s.error %}
+        {% if s.rules_hash == local_hash %}
+        <span class="badge applied">same as here</span>
+        {% else %}
+        <span class="badge pending">differs</span>
+        {% endif %}
+        {% endif %}
+        {% if p.url in pending %}
+        <span class="badge pending">apply queued</span>
+        <span class="muted">since {{ pending[p.url].queued_at }} by
+          {{ pending[p.url].applied_by }}</span>
+        {% endif %}
+      </td>
+      <td style="white-space:nowrap;">
+        {% if p.url in pending %}
+        <form class="inline" method="post" action="{{ url_for('cluster_pending_cancel') }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <input type="hidden" name="url" value="{{ p.url }}">
+          <button class="btn small" type="submit">Cancel queued</button>
+        </form>
+        {% endif %}
+        <form class="inline" method="post" action="{{ url_for('cluster_remove') }}"
+              onsubmit="return confirm('Remove {{ p.name }} from this instance\'s list?');">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <input type="hidden" name="url" value="{{ p.url }}">
+          <button class="btn small danger" type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No other instances registered yet.</p>
+  {% endif %}
+
+  {% if cluster_enabled and node_url %}
+  <form method="post" action="{{ url_for('cluster_add') }}" class="row" style="margin-top:1rem;">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <div>
+      <label for="peer-url">Register an instance (URL of any existing member's admin panel)</label>
+      <input type="text" id="peer-url" name="url" placeholder="http://radius2.example.org:8080" required>
+    </div>
+    <div style="flex:0;">
+      <button class="btn primary" type="submit">Register</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+{% endblock %}
