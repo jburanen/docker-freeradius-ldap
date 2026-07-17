@@ -64,6 +64,19 @@ pre.preview.log { max-height:65vh; overflow:auto; }
 .tabs .tab:hover { text-decoration:none; border-color:#b9c2cc; }
 .tabs .tab.active { background:var(--accent); border-color:var(--accent); color:#fff; }
 .check-label { display:inline; color:var(--muted); font-size:.85rem; margin-right:.6rem; }
+/* Dark/light sliding toggle (sits in the always-dark header) */
+.theme-toggle { position:relative; width:46px; height:24px; flex:0 0 auto; padding:0;
+  border:none; outline:none; border-radius:99px; cursor:pointer;
+  background:rgba(255,255,255,.18); transition:background .18s; }
+.theme-toggle:hover { background:rgba(255,255,255,.28); }
+.theme-toggle:focus-visible { box-shadow:0 0 0 2px var(--accent); }
+.theme-toggle .knob { position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%;
+  background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.4); font-size:11px; line-height:18px;
+  text-align:center; transition:transform .18s ease; }
+.theme-toggle .knob::before { content:"🌙"; }
+:root[data-theme="dark"] .theme-toggle .knob { transform:translateX(22px); }
+:root[data-theme="light"] .theme-toggle .knob { transform:translateX(0); }
+:root[data-theme="light"] .theme-toggle .knob::before { content:"☀"; }
 .apply-layout { display:flex; gap:1.8rem; align-items:flex-start; flex-wrap:wrap; margin-top:.4rem; }
 .apply-layout .preview-col { flex:0 1 34rem; min-width:16rem; }
 .apply-layout .preview-col pre.preview { margin:.3rem 0 .5rem; }
@@ -99,8 +112,9 @@ footer .gh-mark { vertical-align:-0.18em; margin-right:.35em; }
   </nav>
   {% endif %}
   <div class="spacer"></div>
-  <button id="theme-toggle" class="btn small" type="button"
-          onclick="toggleTheme()" title="Switch between dark and light mode"></button>
+  <button id="theme-toggle" class="theme-toggle" type="button" role="switch"
+          onclick="toggleTheme()" title="Switch between dark and light mode"
+          aria-label="Toggle dark mode"><span class="knob"></span></button>
   {% if session.user %}
   <span class="user">{{ session.user }}</span>
   <form class="inline" method="post" action="{{ url_for('logout') }}">
@@ -143,17 +157,16 @@ footer .gh-mark { vertical-align:-0.18em; margin-right:.35em; }
     .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg> github.com/jburanen/docker-freeradius-ldap</a>
 </footer>
 <script>
-function themeIcon() {
-  document.getElementById('theme-toggle').textContent =
-    document.documentElement.dataset.theme === 'dark' ? '☀' : '🌙';
-}
 function toggleTheme() {
+  // The knob position and icon follow :root[data-theme] purely in CSS.
   const root = document.documentElement;
   root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
   localStorage.setItem('theme', root.dataset.theme);
-  themeIcon();
+  document.getElementById('theme-toggle')
+    .setAttribute('aria-checked', root.dataset.theme === 'dark');
 }
-themeIcon();
+document.getElementById('theme-toggle')
+  .setAttribute('aria-checked', document.documentElement.dataset.theme === 'dark');
 
 function copyCmd(btn) {
   const text = btn.parentElement.querySelector('code.cmd').textContent;
