@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.5.0"
+ADMIN_VERSION = "1.6.0"
 
 
 def env(name, default=None, required=False):
@@ -275,7 +275,14 @@ def render_users_file(rules):
             continue
         group = rule["ldap_group"].replace("\\", "\\\\").replace('"', '\\"')
         checks = [f'Ldap-Group == "{group}"']
-        if rule.get("nas_ip"):
+        if rule.get("nas_profile"):
+            # A profile groups one or more CIDRs that all share the profile
+            # name as their client shortname; the sites copy %{client:shortname}
+            # into &request:Tmp-String-8 before calling files, so matching the
+            # name here scopes the rule to every NAS in the profile.
+            prof = rule["nas_profile"].replace("\\", "\\\\").replace('"', '\\"')
+            checks.append(f'Tmp-String-8 == "{prof}"')
+        elif rule.get("nas_ip"):
             checks.append(f"NAS-IP-Address == {rule['nas_ip']}")
         lines.append(f"# rule: {rule['name']}")
         lines.append("DEFAULT\t" + ", ".join(checks))
@@ -652,6 +659,9 @@ def validate_rules_payload(rules):
                 ipaddress.ip_address(rule["nas_ip"])
             except ValueError:
                 return f"invalid NAS IP in rule {name!r}"
+        profile = rule.get("nas_profile")
+        if profile is not None and (not isinstance(profile, str) or "\n" in profile):
+            return f"invalid NAS profile in rule {name!r}"
         attrs = rule.get("attributes")
         if not isinstance(attrs, list) or not attrs:
             return f"rule {name!r} has no attributes"
@@ -1005,21 +1015,31 @@ def login_required(view):
     return wrapped
 
 
-def validate_rule_form(form):
+def validate_rule_form(form, profile_names=()):
     errors = []
     name = form.get("name", "").strip()
     ldap_group = form.get("ldap_group", "").strip()
-    nas_ip = form.get("nas_ip", "").strip()
+    nas_mode = form.get("nas_mode", "any").strip()
+    nas_ip = ""
+    nas_profile = ""
     enabled = form.get("enabled") == "on"
     if not name:
         errors.append("Rule name is required.")
     if not ldap_group or "\n" in ldap_group:
         errors.append("LDAP group is required (single line).")
-    if nas_ip:
-        try:
-            ipaddress.ip_address(nas_ip)
-        except ValueError:
-            errors.append("NAS IP must be a single valid IP address (or empty).")
+    if nas_mode == "ip":
+        nas_ip = form.get("nas_ip", "").strip()
+        if nas_ip:
+            try:
+                ipaddress.ip_address(nas_ip)
+            except ValueError:
+                errors.append("NAS IP must be a single valid IP address (or empty).")
+    elif nas_mode == "profile":
+        nas_profile = form.get("nas_profile", "").strip()
+        if not nas_profile:
+            errors.append("Select a client profile, or choose a different match.")
+        elif profile_names and nas_profile not in profile_names:
+            errors.append(f"Unknown client profile: {nas_profile!r}")
 
     attributes = []
     for attr, op, value in zip(
@@ -1042,6 +1062,7 @@ def validate_rule_form(form):
         "name": name,
         "ldap_group": ldap_group,
         "nas_ip": nas_ip,
+        "nas_profile": nas_profile,
         "enabled": enabled,
         "attributes": attributes,
     }
@@ -1253,8 +1274,9 @@ def index():
 @app.route("/rules/new", methods=["GET", "POST"])
 @login_required
 def rule_new():
+    profiles = [c["name"] for c in load_clients()]
     if request.method == "POST":
-        rule, errors = validate_rule_form(request.form)
+        rule, errors = validate_rule_form(request.form, profiles)
         if errors:
             for e in errors:
                 flash(e, "error")
@@ -1266,7 +1288,7 @@ def rule_new():
             flash(f"Rule '{rule['name']}' saved. Apply to activate it.", "ok")
             flash_vendor_reminders(rule)
             return redirect(url_for("index"))
-    return render_template("edit.html", rule=None, presets=PRESETS)
+    return render_template("edit.html", rule=None, presets=PRESETS, profiles=profiles)
 
 
 @app.route("/rules/<rule_id>/edit", methods=["GET", "POST"])
@@ -1276,8 +1298,9 @@ def rule_edit(rule_id):
     existing = next((r for r in rules if r["id"] == rule_id), None)
     if existing is None:
         abort(404)
+    profiles = [c["name"] for c in load_clients()]
     if request.method == "POST":
-        rule, errors = validate_rule_form(request.form)
+        rule, errors = validate_rule_form(request.form, profiles)
         if errors:
             for e in errors:
                 flash(e, "error")
@@ -1288,7 +1311,7 @@ def rule_edit(rule_id):
             flash(f"Rule '{rule['name']}' updated. Apply to activate the change.", "ok")
             flash_vendor_reminders(rule)
             return redirect(url_for("index"))
-    return render_template("edit.html", rule=existing, presets=PRESETS)
+    return render_template("edit.html", rule=existing, presets=PRESETS, profiles=profiles)
 
 
 @app.post("/rules/<rule_id>/delete")

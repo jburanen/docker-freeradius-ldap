@@ -9,18 +9,18 @@
     </div>
   </div>
   <p class="muted">Each rule sends RADIUS reply attributes to users who are
-  members of an LDAP/AD group (optionally limited to one NAS IP). Saving a
-  rule does not change the running server &mdash; press <strong>Apply</strong>
-  below.</p>
+  members of an LDAP/AD group (optionally limited to a client profile or a
+  single NAS IP). Saving a rule does not change the running server &mdash;
+  press <strong>Apply</strong> below.</p>
 
   {% if rules %}
   <table>
-    <tr><th>Rule</th><th>LDAP group</th><th>NAS IP</th><th>Attributes</th><th>Status</th><th></th></tr>
+    <tr><th>Rule</th><th>LDAP group</th><th>Applies to</th><th>Attributes</th><th>Status</th><th></th></tr>
     {% for r in rules %}
     <tr>
       <td><a href="{{ url_for('rule_edit', rule_id=r.id) }}">{{ r.name }}</a></td>
       <td>{{ r.ldap_group }}</td>
-      <td>{{ r.nas_ip or "any" }}</td>
+      <td>{% if r.nas_profile %}profile: {{ r.nas_profile }}{% elif r.nas_ip %}{{ r.nas_ip }}{% else %}any{% endif %}</td>
       <td>
         {% for a in r.attributes %}
         <code>{{ a.attr }} {{ a.op }} {{ a.value }}</code>{% if not loop.last %}<br>{% endif %}

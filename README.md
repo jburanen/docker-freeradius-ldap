@@ -33,8 +33,9 @@ group named by `ADMIN_GROUP`.
 ## Admin panel
 
 The `radius-admin` service manages **attribute rules**: each rule maps an
-LDAP/AD group (optionally restricted to a single NAS IP) to a list of RADIUS
-reply attributes. Typical use: members of `netadmins` get
+LDAP/AD group (optionally restricted to a single NAS IP, or to a **client
+profile** defined on the Clients tab so it covers every CIDR in that profile)
+to a list of RADIUS reply attributes. Typical use: members of `netadmins` get
 `Cisco-AVPair = "shell:priv-lvl=15"` on Cisco switches, `CP-Gaia-User-Role =
 adminRole` on Check Point Gaia, `Foundry-Privilege-Level = 0` on Brocade ICX —
 all available as one-click presets, plus free-form attributes from any

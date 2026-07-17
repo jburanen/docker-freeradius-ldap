@@ -55,6 +55,15 @@ server default {
 			}
 		}
 
+		# Expose the matching client's shortname (= the radius-admin
+		# client *profile* name, shared by every CIDR block in the
+		# profile) so an attribute rule can be scoped to a profile.
+		# rlm_files matches check items against the request list, so the
+		# copy targets &request (like NAS-IP-Address), not &control.
+		update request {
+			&Tmp-String-8 := "%{client:shortname}"
+		}
+
 		# Group/vendor reply attributes managed by the radius-admin web
 		# UI. rlm_files reads mods-config/files/authorize; a HUP reloads
 		# it (and keeps the old rules if the new file fails to parse).

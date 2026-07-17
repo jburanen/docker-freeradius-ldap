@@ -53,11 +53,19 @@ custom RADIUS reply attributes.
     `RADIUS_REQUIRED_GROUP` (empty = allow all directory users).
 - `radius-admin` service (`web/`): Flask + ldap3 + waitress on python alpine,
   built by compose. Manages "attribute rules" (LDAP group [+ optional NAS
-  IP] → RADIUS reply attributes) stored in the `admin-data` volume as
+  scope: a single NAS IP or a **client profile**] → RADIUS reply attributes) stored in the `admin-data` volume as
   rules.json, rendered as a FreeRADIUS users file into the `radius-policy`
   volume, which freeradius mounts at `/opt/etc/raddb/mods-config/files`
   (read by the stock `files` module; both sites call `files` in authorize).
-  Apply = rewrite file + SIGHUP radiusd via shared PID namespace
+  A rule's NAS scope renders to a `files` check item: an IP →
+  `NAS-IP-Address == <ip>`, a profile → `Tmp-String-8 == "<profile>"`. Both
+  sites copy `%{client:shortname}` into `&request:Tmp-String-8` right before
+  `files`; since every CIDR block of a profile shares `shortname = <profile>`,
+  matching the name scopes the rule to all of the profile's CIDRs at once
+  (something an exact `NAS-IP-Address ==` cannot do). The rule form's profile
+  dropdown is populated from clients.json; a rule referencing a since-deleted
+  profile still renders (shown "(deleted)" in the editor) and simply never
+  matches. Apply = rewrite file + SIGHUP radiusd via shared PID namespace
   (`pid: "container:freeradius"`). A **Clients** tab manages client
   **profiles** (clients.json in admin-data → `clients.conf` on the
   `radius-clients` volume). A profile is a named parameter set (secret,
@@ -124,6 +132,14 @@ custom RADIUS reply attributes.
   do not apply it**. Ldap-Group is a virtual comparison attribute; an
   &attribute reference on the RHS is a fatal parse error ("Cannot use
   attribute reference on right side of condition"). Verified 2026-07-15.
+- Profile-scoped attribute rules use `&request:Tmp-String-8` (NOT control):
+  `rlm_files` matches check items against the **request** list, so the
+  `%{client:shortname}` copy must land there — same list NAS-IP-Address lives
+  in. Contrast Tmp-String-9, which is `&control` because it is read from an
+  unlang `if` condition, not by files. Two different Tmp-String slots on
+  purpose. In an EAP inner tunnel `%{client:shortname}` may resolve to the
+  inner client rather than the real NAS (same limitation the old NAS-IP scope
+  had); scope such rules by group alone if that bites.
 - **Line endings matter**: raddb/LDIF/compose files must stay LF —
   `.gitattributes` enforces this. CRLF breaks parsing inside the containers.
 - `chase_referrals = yes` + `rebind = yes` in the ldap module are required

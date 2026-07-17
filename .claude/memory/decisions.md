@@ -13,6 +13,29 @@ rejected.
 **Rejected alternatives:** ...
 ```
 
+## 2026-07-17 — Attribute rules can target a client profile, not just a NAS IP
+**Decided:** A rule's NAS scope is now one of: all devices, a single NAS IP,
+or a client **profile** (picked from clients.json in the rule editor). Model:
+rules keep `nas_ip` and gain `nas_profile` (mutually exclusive, both empty =
+any). Rendering: profile → `Tmp-String-8 == "<profile>"`, IP →
+`NAS-IP-Address == <ip>` (unchanged). Both sites copy `%{client:shortname}`
+into `&request:Tmp-String-8` right before `files`; every CIDR block of a
+profile shares `shortname = <profile>`, so one name matches all its CIDRs.
+**Why:** Profiles already group a set of NAS CIDRs with shared params; letting
+a rule reference the profile means no re-typing IPs, and it matches CIDR
+ranges/multiple entries — which an exact `NAS-IP-Address ==` check can't.
+Reusing the profile's shortname is the FreeRADIUS-native "match a client
+group" idiom and needs no new state.
+**Rejected alternatives:** Expanding a profile into multiple
+`NAS-IP-Address ==` checks (users-file `==` is exact, not CIDR, and multiple
+checks AND rather than OR — wrong for multi-CIDR profiles). Using
+`&control:Tmp-String-8` (rlm_files matches check items against the *request*
+list, so control wouldn't be seen — unlike Tmp-String-9, which is read in an
+unlang condition). Storing profile IPs on the rule (would drift from the
+Clients tab; better to match live by shortname).
+**Caveat:** In an EAP inner tunnel `%{client:shortname}` may resolve to the
+inner client, not the real NAS — same limitation the NAS-IP scope always had.
+
 ## 2026-07-17 — Clients modeled as profiles (params + multiple CIDRs)
 **Decided:** A Clients-tab entry is a "profile": one named parameter set
 (secret, proto, nas_type, msg-auth/proxy-state, extra directives) plus a list

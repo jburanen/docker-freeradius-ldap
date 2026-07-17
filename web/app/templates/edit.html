@@ -18,9 +18,30 @@
                placeholder="e.g. netadmins">
       </div>
       <div>
-        <label for="nas_ip">NAS IP (optional, exact match)</label>
+        {% set nas_mode = 'profile' if (rule and rule.nas_profile) else ('ip' if (rule and rule.nas_ip) else 'any') %}
+        <label for="nas_mode">Applies to</label>
+        <select id="nas_mode" name="nas_mode" onchange="updateNasMode()">
+          <option value="any" {% if nas_mode == 'any' %}selected{% endif %}>All devices</option>
+          <option value="profile" {% if nas_mode == 'profile' %}selected{% endif %}>A client profile</option>
+          <option value="ip" {% if nas_mode == 'ip' %}selected{% endif %}>A specific NAS IP</option>
+        </select>
+      </div>
+      <div id="nas_profile_field" style="display:none;">
+        <label for="nas_profile">Client profile</label>
+        <select id="nas_profile" name="nas_profile">
+          {% set current = rule.nas_profile if rule else '' %}
+          {% for p in profiles %}
+          <option value="{{ p }}" {% if p == current %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+          {% if current and current not in profiles %}
+          <option value="{{ current }}" selected>{{ current }} (deleted)</option>
+          {% endif %}
+        </select>
+      </div>
+      <div id="nas_ip_field" style="display:none;">
+        <label for="nas_ip">NAS IP (exact match)</label>
         <input type="text" id="nas_ip" name="nas_ip" value="{{ rule.nas_ip if rule else '' }}"
-               placeholder="empty = all devices">
+               placeholder="e.g. 10.0.0.1">
       </div>
     </div>
 
@@ -71,6 +92,13 @@
 
 <script>
 const PRESETS = {{ presets | tojson }};
+
+function updateNasMode() {
+  const mode = document.getElementById('nas_mode').value;
+  document.getElementById('nas_profile_field').style.display = mode === 'profile' ? '' : 'none';
+  document.getElementById('nas_ip_field').style.display = mode === 'ip' ? '' : 'none';
+}
+updateNasMode();
 
 function addRow(attr, op, value) {
   const table = document.getElementById('attrs');

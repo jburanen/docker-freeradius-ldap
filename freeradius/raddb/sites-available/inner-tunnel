@@ -44,6 +44,15 @@ server inner-tunnel {
 			}
 		}
 
+		# Expose the matching client's shortname (= the radius-admin
+		# client profile name) so an attribute rule can be scoped to a
+		# profile -- see the note in sites-available/default. In an EAP
+		# tunnel %{client:shortname} resolves to the inner client; if it
+		# does not match the real NAS, scope such rules by group only.
+		update request {
+			&Tmp-String-8 := "%{client:shortname}"
+		}
+
 		# Reply attributes managed by the radius-admin web UI
 		files
 
