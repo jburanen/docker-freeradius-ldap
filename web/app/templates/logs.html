@@ -2,9 +2,17 @@
 {% block content %}
 
 <div class="card">
-  <div class="row" style="align-items:center;">
-    <div><h2 style="margin:0;">Logs</h2></div>
-    <div style="flex:0; white-space:nowrap;">
+  <h2 style="margin:0;">Logs</h2>
+
+  <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;
+              margin-top:1rem; margin-bottom:.8rem;">
+    <div class="tabs" style="margin:0;">
+      {% for key, info in log_files.items() %}
+      <a class="tab{{ ' active' if key == log_name }}"
+         href="{{ url_for('logs', log_name=key) }}">{{ info.label }}</a>
+      {% endfor %}
+    </div>
+    <div style="margin-left:auto; white-space:nowrap;">
       <label class="check-label"><input type="checkbox" id="autorefresh" checked> Auto-refresh</label>
       <form class="inline" method="post" action="{{ url_for('logs_clear', log_name=log_name) }}"
             onsubmit="return confirm('Clear the {{ log_files[log_name].label }} log?');">
@@ -12,13 +20,6 @@
         <button class="btn small danger" type="submit">Clear log</button>
       </form>
     </div>
-  </div>
-
-  <div class="tabs">
-    {% for key, info in log_files.items() %}
-    <a class="tab{{ ' active' if key == log_name }}"
-       href="{{ url_for('logs', log_name=key) }}">{{ info.label }}</a>
-    {% endfor %}
   </div>
 
   {% if log_name == 'freeradius' %}
