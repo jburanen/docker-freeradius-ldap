@@ -2,12 +2,7 @@
 {% block content %}
 
 <div class="card">
-  <div class="row" style="align-items:center;">
-    <div><h2 style="margin:0;">Client profiles</h2></div>
-    <div style="flex:0;">
-      <a class="btn primary" href="{{ url_for('client_new') }}">New profile</a>
-    </div>
-  </div>
+  <h2 style="margin:0;">Client profiles</h2>
   <p class="muted">Each profile is a shared parameter set (secret, protocol,
   options) applied to one or more CIDRs of NAS devices (switches, APs,
   firewalls, VPNs); every CIDR becomes its own FreeRADIUS client. Saving a
@@ -47,6 +42,10 @@
   <p class="muted">No profiles defined. With no enabled profile the server
   rejects every request &mdash; add one.</p>
   {% endif %}
+
+  <div style="margin-top:1rem;">
+    <a class="btn primary" href="{{ url_for('client_new') }}">New profile</a>
+  </div>
 </div>
 
 <div class="card">

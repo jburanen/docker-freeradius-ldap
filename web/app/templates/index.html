@@ -2,12 +2,7 @@
 {% block content %}
 
 <div class="card">
-  <div class="row" style="align-items:center;">
-    <div><h2 style="margin:0;">Attribute Rules</h2></div>
-    <div style="flex:0;">
-      <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
-    </div>
-  </div>
+  <h2 style="margin:0;">Attribute Rules</h2>
   <p class="muted">Each rule sends RADIUS reply attributes to users who are
   members of an LDAP/AD group (optionally limited to a client profile or a
   single NAS IP). Saving a rule does not change the running server &mdash;
@@ -48,6 +43,10 @@
   <p class="muted">No rules yet. Create one to send vendor attributes (Cisco,
   Check Point Gaia, Brocade ICX presets available).</p>
   {% endif %}
+
+  <div style="margin-top:1rem;">
+    <a class="btn primary" href="{{ url_for('rule_new') }}">New rule</a>
+  </div>
 </div>
 
 <div class="card">
