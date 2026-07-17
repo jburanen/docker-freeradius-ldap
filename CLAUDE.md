@@ -149,8 +149,13 @@ custom RADIUS reply attributes.
   cluster API) and only converted for display by the `|localtime` Jinja
   filter. Both containers mount `/etc/localtime:ro` from the (Linux) host so
   rendered stamps and log lines follow the host timezone.
-- The /cluster route normalizes each peer's status to a dict with `state`
-  and `clients_state` present before rendering. A peer on an older version
+- The Rules and Clients dashboards fetch peer statuses (via
+  `fetch_peer_statuses`, timeout 4s each) when a cluster is configured, to
+  show per-instance applied/pending in the Apply box — so those pages do
+  blocking peer HTTP on every load when clustered (a down peer adds up to its
+  timeout). No cluster configured (no peers) = no calls.
+- `fetch_peer_statuses` / the /cluster route normalize each peer's status to a
+  dict with `state` and `clients_state` present before rendering. A peer on an older version
   omits newer keys (e.g. `clients_state`), and the default Jinja `Undefined`
   RAISES on nested attribute access (`s.clients_state.applied_at`) → 500. Keep
   peer-status fields defaulted in the route, not assumed present in templates.

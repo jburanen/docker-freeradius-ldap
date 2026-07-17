@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.4.2"
+ADMIN_VERSION = "1.5.0"
 
 
 def env(name, default=None, required=False):
@@ -1163,6 +1163,48 @@ def push_config_to_peers(kind, payload, peers, targets, config_ts, user):
         flash(f"{peer['name']}: {message}", "ok" if ok else "error")
 
 
+def fetch_peer_statuses(peers, timeout=4):
+    """Query each peer's /api/cluster/status. Values are always dicts with
+    `state` and `clients_state` present (a peer on an older version omits
+    newer keys; an error/non-dict response becomes {'error': ...})."""
+    statuses = {}
+    for peer in peers:
+        try:
+            status = cluster_call(peer["url"], "/api/cluster/status", {}, timeout=timeout)
+            if not isinstance(status, dict):
+                status = {"error": "unexpected response from peer"}
+        except ClusterError as exc:
+            status = {"error": str(exc)}
+        status.setdefault("state", {})
+        status.setdefault("clients_state", {})
+        statuses[peer["url"]] = status
+    return statuses
+
+
+def instance_sync_rows(kind, peers, statuses, local_pending, local_hash):
+    """Per-instance apply status for the dashboard Apply box. Each row is
+    applied (this instance's running config == the config shown here),
+    pending (an Apply would change it), or unreachable. kind in
+    {rules, clients}."""
+    state_key = "state" if kind == "rules" else "clients_state"
+    rows = [{
+        "value": "local",
+        "name": CLUSTER_NODE_NAME,
+        "local": True,
+        "status": "pending" if local_pending else "applied",
+    }]
+    for peer in peers:
+        status = statuses.get(peer["url"], {})
+        if status.get("error"):
+            state = "unreachable"
+        else:
+            applied_hash = (status.get(state_key) or {}).get("applied_hash")
+            state = "applied" if applied_hash == local_hash else "pending"
+        rows.append({"value": peer["url"], "name": peer.get("name"),
+                     "local": False, "status": state})
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -1192,14 +1234,19 @@ def logout():
 @login_required
 def index():
     rules = load_rules()
+    peers = load_peers()
+    local_pending = pending_changes(rules)
+    statuses = fetch_peer_statuses(peers) if peers else {}
     return render_template(
         "index.html",
         rules=rules,
         preview=render_users_file(rules),
         state=load_state(),
-        pending=pending_changes(rules),
-        peers=load_peers(),
+        peers=peers,
         node_name=CLUSTER_NODE_NAME,
+        local_status="pending" if local_pending else "applied",
+        instances=instance_sync_rows("rules", peers, statuses, local_pending,
+                                     rendered_hash(rules)),
     )
 
 
@@ -1271,14 +1318,19 @@ def rule_toggle(rule_id):
 @login_required
 def clients_page():
     clients = load_clients()
+    peers = load_peers()
+    local_pending = clients_pending(clients)
+    statuses = fetch_peer_statuses(peers) if peers else {}
     return render_template(
         "clients.html",
         clients=clients,
         preview=render_clients_conf(clients),
         state=load_clients_state(),
-        pending=clients_pending(clients),
-        peers=load_peers(),
+        peers=peers,
         node_name=CLUSTER_NODE_NAME,
+        local_status="pending" if local_pending else "applied",
+        instances=instance_sync_rows("clients", peers, statuses, local_pending,
+                                     clients_hash(clients)),
     )
 
 
@@ -1403,19 +1455,7 @@ def apply():
 @login_required
 def cluster():
     peers = load_peers()
-    statuses = {}
-    for peer in peers:
-        try:
-            status = cluster_call(peer["url"], "/api/cluster/status", {}, timeout=4)
-            if not isinstance(status, dict):
-                status = {"error": "unexpected response from peer"}
-        except ClusterError as exc:
-            status = {"error": str(exc)}
-        # Normalize so the template can access nested fields even when a peer
-        # is on an older version (no clients_state) or returned an error.
-        status.setdefault("state", {})
-        status.setdefault("clients_state", {})
-        statuses[peer["url"]] = status
+    statuses = fetch_peer_statuses(peers)
     return render_template(
         "cluster.html",
         peers=peers,

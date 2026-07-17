@@ -53,10 +53,7 @@
 <div class="card">
   <div class="apply-layout">
     <div class="preview-col">
-      <h2>Apply to FreeRADIUS
-        {% if pending %}<span class="badge pending">pending changes</span>
-        {% else %}<span class="badge applied">in sync</span>{% endif %}
-      </h2>
+      <h2>Apply to FreeRADIUS</h2>
       <pre class="preview">{{ preview }}</pre>
       {% if state.applied_at %}
       <p class="muted">Last applied {{ state.applied_at|localtime }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
@@ -69,13 +66,17 @@
         <input type="hidden" name="has_targets" value="1">
         <h2>Instances</h2>
         <div class="targets">
-          <label><input type="checkbox" name="target" value="local" checked>
-            {{ node_name }} <span class="muted">(this instance)</span></label>
-          {% for p in peers %}
-          <label><input type="checkbox" name="target" value="{{ p.url }}" checked>
-            {{ p.name }}</label>
+          {% for inst in instances %}
+          <label class="target-row">
+            <input type="checkbox" name="target" value="{{ inst.value }}" checked>
+            <span class="target-name">{{ inst.name }}{% if inst.local %} <span class="muted">(this instance)</span>{% endif %}</span>
+            <span class="sync sync-{{ inst.status }}">{{ inst.status }}</span>
+          </label>
           {% endfor %}
         </div>
+        {% else %}
+        <p class="muted">This instance:
+          <span class="sync sync-{{ local_status }}">{{ local_status }}</span></p>
         {% endif %}
         <button class="btn primary" type="submit">Apply &amp; reload</button>
       </form>

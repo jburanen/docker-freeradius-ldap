@@ -52,21 +52,13 @@
 <div class="card">
   <div class="apply-layout">
     <div class="preview-col">
-      <h2>Apply to FreeRADIUS
-        {% if pending %}<span class="badge pending">pending changes</span>
-        {% else %}<span class="badge applied">in sync</span>{% endif %}
-      </h2>
+      <h2>Apply to FreeRADIUS</h2>
       <pre class="preview">{{ preview }}</pre>
       {% if state.applied_at %}
       <p class="muted">Last applied {{ state.applied_at|localtime }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
       {% endif %}
     </div>
     <div class="apply-side">
-      <p class="muted">Applying rewrites <code>clients.conf</code> and
-      <strong>restarts radiusd</strong> (unlike rule changes, client changes
-      can't be hot-reloaded). Expect a ~1&ndash;2&nbsp;second interruption. If
-      the new file fails to load, the panel rolls back to the previous
-      clients automatically.</p>
       <form method="post" action="{{ url_for('clients_apply') }}"
             onsubmit="return confirm('Apply client changes and restart radiusd now?');">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
@@ -74,17 +66,26 @@
         <input type="hidden" name="has_targets" value="1">
         <h2 style="margin-top:0;">Instances</h2>
         <div class="targets">
-          <label><input type="checkbox" name="target" value="local" checked>
-            {{ node_name }} <span class="muted">(this instance)</span></label>
-          {% for p in peers %}
-          <label><input type="checkbox" name="target" value="{{ p.url }}" checked>
-            {{ p.name }}</label>
+          {% for inst in instances %}
+          <label class="target-row">
+            <input type="checkbox" name="target" value="{{ inst.value }}" checked>
+            <span class="target-name">{{ inst.name }}{% if inst.local %} <span class="muted">(this instance)</span>{% endif %}</span>
+            <span class="sync sync-{{ inst.status }}">{{ inst.status }}</span>
+          </label>
           {% endfor %}
         </div>
-        <p class="muted">Each selected instance restarts its own radiusd. An
-        instance that is unreachable is queued and caught up automatically.</p>
+        {% else %}
+        <p class="muted" style="margin-top:0;">This instance:
+          <span class="sync sync-{{ local_status }}">{{ local_status }}</span></p>
         {% endif %}
         <button class="btn primary" type="submit">Apply &amp; restart</button>
+        <p class="muted">Applying rewrites <code>clients.conf</code> and
+        <strong>restarts radiusd</strong> (unlike rule changes, client changes
+        can't be hot-reloaded); expect a ~1&ndash;2&nbsp;second interruption.
+        If the new file fails to load, the panel rolls back to the previous
+        clients automatically.{% if peers %} Each selected instance restarts
+        its own radiusd; an unreachable one is queued and caught up
+        automatically.{% endif %}</p>
       </form>
     </div>
   </div>
