@@ -14,14 +14,12 @@
       </td>
     </tr>
   </table>
-  {% if not cluster_enabled or not node_url %}
   <p class="muted">To cluster several deployments of this stack, set in each
   instance's <code>.env</code>: the <strong>same</strong>
   <code>CLUSTER_SECRET</code> on all of them, a friendly
   <code>CLUSTER_NODE_NAME</code>, and <code>CLUSTER_NODE_URL</code> (this
   panel's address as the <em>other</em> instances reach it). Then recreate
   radius-admin and register any existing member below.</p>
-  {% endif %}
 </div>
 
 <div class="card">

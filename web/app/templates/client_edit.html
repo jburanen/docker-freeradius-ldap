@@ -67,7 +67,7 @@
         <label for="require_message_authenticator">Require Message-Authenticator
           <span class="muted">(BlastRADIUS / CVE-2024-3596)</span></label>
         <select id="require_message_authenticator" name="require_message_authenticator">
-          {% set ma = profile.require_message_authenticator if profile else 'yes' %}
+          {% set ma = profile.require_message_authenticator if profile else 'auto' %}
           {% for v in ['yes', 'no', 'auto'] %}
           <option value="{{ v }}" {% if ma == v %}selected{% endif %}>{{ v }}</option>
           {% endfor %}
