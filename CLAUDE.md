@@ -58,13 +58,18 @@ custom RADIUS reply attributes.
   volume, which freeradius mounts at `/opt/etc/raddb/mods-config/files`
   (read by the stock `files` module; both sites call `files` in authorize).
   Apply = rewrite file + SIGHUP radiusd via shared PID namespace
-  (`pid: "container:freeradius"`). A **Clients** tab manages RADIUS clients
-  (clients.json in admin-data → `clients.conf` on the `radius-clients`
-  volume); its Apply rewrites the file and **restarts** radiusd (SIGTERM the
-  radiusd child → supervisor relaunches; SIGHUP does NOT reload clients),
-  keeping a `.prev` backup and rolling back automatically if the new file
-  fails to load (a crash-looping radiusd never stays up ~2s, which is the
-  failure signal). Default client is seeded on first run. Login = LDAP
+  (`pid: "container:freeradius"`). A **Clients** tab manages client
+  **profiles** (clients.json in admin-data → `clients.conf` on the
+  `radius-clients` volume). A profile is a named parameter set (secret,
+  proto, options) plus one or more CIDRs; each CIDR renders as its own
+  `client{}` block (unique block name `<profile>` or `<profile>-<n>`, all
+  sharing `shortname = <profile>`). Its Apply rewrites the file and
+  **restarts** radiusd (SIGTERM the radiusd child → supervisor relaunches;
+  SIGHUP does NOT reload clients), keeping a `.prev` backup and rolling back
+  automatically if the new file fails to load (a crash-looping radiusd never
+  stays up ~2s, which is the failure signal). A default profile is seeded on
+  first run. Legacy single-`ipaddr` clients (≤1.3) are migrated to `cidrs`
+  on load. Login = LDAP
   bind-as-user with the same
   `LDAP_*` env vars, gated by `ADMIN_GROUP` membership (memberOf first, then
   member/uniqueMember/memberUid group search). A tabbed "Logs" page tails
@@ -97,9 +102,10 @@ custom RADIUS reply attributes.
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
   dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x
-  share/dictionary on GitHub). The **Clients** tab exposes name, IP/CIDR,
-  secret, proto, nas_type, per-client require_message_authenticator /
-  limit_proxy_state, and free-form extra directives.
+  share/dictionary on GitHub). Each client profile exposes name, one or more
+  CIDRs, secret, proto, nas_type, require_message_authenticator /
+  limit_proxy_state, and free-form extra directives; profile names must be
+  unique (they seed the client{} block names).
 
 ## Gotchas / domain notes
 

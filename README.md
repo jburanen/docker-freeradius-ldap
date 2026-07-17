@@ -49,9 +49,11 @@ dictionary FreeRADIUS loads.
   dashboard shows a "pending changes" badge and a live preview of the
   generated file.
 - **Clients** (tab) manages the RADIUS clients (NAS devices) that may talk to
-  the server: IP/CIDR, shared secret, protocol, NAS type, per-client
-  BlastRADIUS options (Message-Authenticator / Proxy-State), and any extra
-  `clients.conf` directives. A default client (`0.0.0.0/0`, secret
+  the server, organized as **profiles**: a shared parameter set — shared
+  secret, protocol, NAS type, per-client BlastRADIUS options
+  (Message-Authenticator / Proxy-State), and any extra `clients.conf`
+  directives — applied to **one or more CIDRs**, each of which becomes its own
+  FreeRADIUS client block. A default profile (CIDR `0.0.0.0/0`, secret
   `testing123`) is seeded on first run. Because FreeRADIUS loads clients only
   at startup, **Apply** on this tab restarts radiusd (a ~1–2 s interruption)
   rather than hot-reloading; if the new configuration fails to load, the
@@ -198,8 +200,8 @@ CLAUDE.md                     # project context for AI-assisted development
 - `.env` holds all secrets and is git-ignored; only `.env.example` (safe
   placeholders) is committed. Client shared secrets live in the
   `admin-data`/`radius-clients` volumes, not `.env`.
-- In the Clients tab, restrict each client's IP/CIDR to your NAS subnet and
-  replace the seeded default client (`0.0.0.0/0`, secret `testing123`) before
+- In the Clients tab, restrict each profile's CIDRs to your NAS subnets and
+  replace the seeded default profile (`0.0.0.0/0`, secret `testing123`) before
   exposing the server.
 - Use `ldaps://` or `LDAP_START_TLS=yes` plus a least-privilege bind account
   against production directories.

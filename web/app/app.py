@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.3.1"
+ADMIN_VERSION = "1.4.0"
 
 
 def env(name, default=None, required=False):
@@ -127,7 +127,10 @@ ATTR_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 UNQUOTED_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 OPERATORS = ("=", ":=", "+=")
 
-# --- RADIUS clients (NAS devices), managed by the Clients tab ---
+# --- Client profiles, managed by the Clients tab ---
+# A profile is a named parameter set (secret, proto, options, ...) plus one or
+# more CIDRs. Each CIDR is rendered as its own FreeRADIUS client{} block, all
+# sharing the profile name as their shortname.
 CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 NAS_TYPE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 # Each free-form extra line must be `directive = value`; no braces (which
@@ -136,13 +139,13 @@ CLIENT_EXTRA_RE = re.compile(r"^[A-Za-z0-9_]+\s*=\s*[^{}\r\n]+$")
 TRISTATE = ("yes", "no", "auto")
 CLIENT_PROTOS = ("udp", "tcp", "*")
 
-# Out-of-box client: the same values the four removed RADIUS_CLIENT_* env
+# Out-of-box profile: the same values the four removed RADIUS_CLIENT_* env
 # vars used to seed. Written on first run; editable in the panel afterwards.
 def default_clients():
     return [{
         "id": uuid.uuid4().hex[:12],
         "name": "default",
-        "ipaddr": "0.0.0.0/0",
+        "cidrs": ["0.0.0.0/0"],
         "secret": "testing123",
         "proto": "udp",
         "nas_type": "other",
@@ -225,8 +228,17 @@ def save_state(state):
     atomic_write(STATE_PATH, json.dumps(state, indent=2))
 
 
+def _migrate_profile(p):
+    """Upgrade a legacy single-`ipaddr` client (<= 1.3) to a `cidrs` profile."""
+    if isinstance(p, dict) and "cidrs" not in p and "ipaddr" in p:
+        p = dict(p)
+        p["cidrs"] = [p.pop("ipaddr")]
+    return p
+
+
 def load_clients():
-    return load_json(CLIENTS_PATH, {"clients": []})["clients"]
+    return [_migrate_profile(p)
+            for p in load_json(CLIENTS_PATH, {"clients": []})["clients"]]
 
 
 def save_clients(clients):
@@ -288,7 +300,7 @@ def write_authorize(rules):
 
 
 # ---------------------------------------------------------------------------
-# clients.conf rendering (RADIUS clients / NAS devices)
+# clients.conf rendering (profile -> one client{} block per CIDR)
 # ---------------------------------------------------------------------------
 
 def _quote_secret(value):
@@ -296,22 +308,37 @@ def _quote_secret(value):
     return f'"{escaped}"'
 
 
-def render_client_block(client):
-    # In FreeRADIUS 3.2 `ipaddr` accepts IPv4, IPv6, and CIDR for both.
-    lines = [f'client {client["name"]} {{']
-    lines.append(f'\tipaddr = {client["ipaddr"]}')
-    lines.append(f'\tproto = {client.get("proto", "udp")}')
-    lines.append(f'\tsecret = {_quote_secret(client["secret"])}')
-    if client.get("nas_type"):
-        lines.append(f'\tnas_type = {client["nas_type"]}')
-    lines.append("\trequire_message_authenticator = "
-                 f'{client.get("require_message_authenticator", "yes")}')
-    lines.append(f'\tlimit_proxy_state = {client.get("limit_proxy_state", "auto")}')
-    for extra in client.get("extra", "").splitlines():
-        if extra.strip():
-            lines.append(f"\t{extra.strip()}")
-    lines.append("}")
-    return "\n".join(lines)
+def profile_cidrs(profile):
+    return [c for c in profile.get("cidrs", []) if str(c).strip()]
+
+
+def render_profile_blocks(profile):
+    """One FreeRADIUS client{} block per CIDR. Block names must be unique, so
+    multi-CIDR profiles get a numeric suffix; all blocks share the profile
+    name as their shortname so logs identify the profile, not the CIDR."""
+    cidrs = profile_cidrs(profile)
+    name = profile["name"]
+    blocks = []
+    for i, cidr in enumerate(cidrs):
+        block_name = name if len(cidrs) == 1 else f"{name}-{i + 1}"
+        # In FreeRADIUS 3.2 `ipaddr` accepts IPv4, IPv6, and CIDR for both.
+        lines = [f'client {block_name} {{']
+        lines.append(f'\tipaddr = {cidr}')
+        if block_name != name:
+            lines.append(f'\tshortname = {name}')
+        lines.append(f'\tproto = {profile.get("proto", "udp")}')
+        lines.append(f'\tsecret = {_quote_secret(profile["secret"])}')
+        if profile.get("nas_type"):
+            lines.append(f'\tnas_type = {profile["nas_type"]}')
+        lines.append("\trequire_message_authenticator = "
+                     f'{profile.get("require_message_authenticator", "yes")}')
+        lines.append(f'\tlimit_proxy_state = {profile.get("limit_proxy_state", "auto")}')
+        for extra in profile.get("extra", "").splitlines():
+            if extra.strip():
+                lines.append(f"\t{extra.strip()}")
+        lines.append("}")
+        blocks.append("\n".join(lines))
+    return blocks
 
 
 def render_clients_conf(clients):
@@ -320,10 +347,12 @@ def render_clients_conf(clients):
         f"# Generated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
         "",
     ]
-    for client in clients:
-        if not client.get("enabled", True):
+    for profile in clients:
+        if not profile.get("enabled", True) or not profile_cidrs(profile):
             continue
-        lines.append(render_client_block(client))
+        lines.append(f"# profile: {profile['name']}")
+        for block in render_profile_blocks(profile):
+            lines.append(block)
         lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -640,39 +669,48 @@ def validate_rules_payload(rules):
 
 
 def validate_clients_payload(clients):
-    """Structural check of a pushed client list; returns an error string or
-    None. Mirrors validate_client_form so a peer can't be handed a clients.conf
-    that would crash-loop its radiusd."""
+    """Structural check of a pushed profile list; returns an error string or
+    None. Mirrors validate_profile_form so a peer can't be handed a
+    clients.conf that would crash-loop its radiusd."""
     if not isinstance(clients, list):
         return "clients must be a list"
     if not any(isinstance(c, dict) and c.get("enabled", True) for c in clients):
-        return "at least one enabled client is required"
-    for client in clients:
-        if not isinstance(client, dict):
-            return "client entries must be objects"
-        name = str(client.get("name", ""))
+        return "at least one enabled profile is required"
+    seen = set()
+    for profile in clients:
+        profile = _migrate_profile(profile)
+        if not isinstance(profile, dict):
+            return "profile entries must be objects"
+        name = str(profile.get("name", ""))
         if not CLIENT_NAME_RE.fullmatch(name):
-            return f"invalid client name {name!r}"
-        try:
-            ipaddress.ip_network(str(client.get("ipaddr", "")), strict=False)
-        except ValueError:
-            return f"invalid IP/CIDR in client {name!r}"
-        secret = client.get("secret")
+            return f"invalid profile name {name!r}"
+        if name.lower() in seen:
+            return f"duplicate profile name {name!r}"
+        seen.add(name.lower())
+        cidrs = profile.get("cidrs")
+        if not isinstance(cidrs, list) or not any(str(c).strip() for c in cidrs):
+            return f"profile {name!r} has no CIDRs"
+        for cidr in cidrs:
+            try:
+                ipaddress.ip_network(str(cidr), strict=False)
+            except ValueError:
+                return f"invalid CIDR {cidr!r} in profile {name!r}"
+        secret = profile.get("secret")
         if not isinstance(secret, str) or not secret or "\n" in secret or "\r" in secret:
-            return f"invalid secret in client {name!r}"
-        if client.get("proto", "udp") not in CLIENT_PROTOS:
-            return f"invalid proto in client {name!r}"
-        if client.get("nas_type") and not NAS_TYPE_RE.fullmatch(str(client["nas_type"])):
-            return f"invalid nas_type in client {name!r}"
-        if client.get("require_message_authenticator", "yes") not in TRISTATE:
-            return f"invalid require_message_authenticator in client {name!r}"
-        if client.get("limit_proxy_state", "auto") not in TRISTATE:
-            return f"invalid limit_proxy_state in client {name!r}"
-        for line in str(client.get("extra", "")).splitlines():
+            return f"invalid secret in profile {name!r}"
+        if profile.get("proto", "udp") not in CLIENT_PROTOS:
+            return f"invalid proto in profile {name!r}"
+        if profile.get("nas_type") and not NAS_TYPE_RE.fullmatch(str(profile["nas_type"])):
+            return f"invalid nas_type in profile {name!r}"
+        if profile.get("require_message_authenticator", "yes") not in TRISTATE:
+            return f"invalid require_message_authenticator in profile {name!r}"
+        if profile.get("limit_proxy_state", "auto") not in TRISTATE:
+            return f"invalid limit_proxy_state in profile {name!r}"
+        for line in str(profile.get("extra", "")).splitlines():
             if line.strip() and not CLIENT_EXTRA_RE.fullmatch(line.strip()):
-                return f"invalid extra directive in client {name!r}"
-        client.setdefault("id", uuid.uuid4().hex[:12])
-        client["enabled"] = bool(client.get("enabled", True))
+                return f"invalid extra directive in profile {name!r}"
+        profile.setdefault("id", uuid.uuid4().hex[:12])
+        profile["enabled"] = bool(profile.get("enabled", True))
     return None
 
 
@@ -1010,10 +1048,10 @@ def validate_rule_form(form):
     return rule, errors
 
 
-def validate_client_form(form):
+def validate_profile_form(form):
     errors = []
     name = form.get("name", "").strip()
-    ipaddr = form.get("ipaddr", "").strip()
+    cidrs = [c.strip() for c in form.getlist("cidr") if c.strip()]
     secret = form.get("secret", "")
     proto = form.get("proto", "udp").strip()
     nas_type = form.get("nas_type", "").strip()
@@ -1023,14 +1061,14 @@ def validate_client_form(form):
     enabled = form.get("enabled") == "on"
 
     if not CLIENT_NAME_RE.fullmatch(name):
-        errors.append("Client name is required (letters, digits, . _ - ).")
-    if not ipaddr:
-        errors.append("IP address / CIDR is required.")
-    else:
+        errors.append("Profile name is required (letters, digits, . _ - ).")
+    if not cidrs:
+        errors.append("At least one IP address / CIDR is required.")
+    for cidr in cidrs:
         try:
-            ipaddress.ip_network(ipaddr, strict=False)
+            ipaddress.ip_network(cidr, strict=False)
         except ValueError:
-            errors.append(f"Invalid IP address or CIDR: {ipaddr!r}")
+            errors.append(f"Invalid IP address or CIDR: {cidr!r}")
     if not secret or "\n" in secret or "\r" in secret:
         errors.append("Shared secret is required (single line).")
     if proto not in CLIENT_PROTOS:
@@ -1046,9 +1084,9 @@ def validate_client_form(form):
             errors.append(f"Invalid extra directive: {line.strip()!r} "
                           "(use `directive = value`, no braces).")
 
-    client = {
+    profile = {
         "name": name,
-        "ipaddr": ipaddr,
+        "cidrs": cidrs,
         "secret": secret,
         "proto": proto,
         "nas_type": nas_type,
@@ -1057,7 +1095,13 @@ def validate_client_form(form):
         "extra": extra,
         "enabled": enabled,
     }
-    return client, errors
+    return profile, errors
+
+
+def profile_name_taken(profiles, name, exclude_id=None):
+    lowered = name.strip().lower()
+    return any(p["name"].strip().lower() == lowered and p.get("id") != exclude_id
+               for p in profiles)
 
 
 def pending_changes(rules):
@@ -1132,7 +1176,7 @@ def login():
         if ok:
             session["user"] = username
             log.info("login ok: %s", username)
-            return redirect(url_for("index"))
+            return redirect(url_for("clients_page"))
         time.sleep(1)  # slow down brute force
         flash(message, "error")
     return render_template("login.html")
@@ -1221,7 +1265,7 @@ def rule_toggle(rule_id):
     return redirect(url_for("index"))
 
 
-# --- Clients (RADIUS NAS devices) ---
+# --- Client profiles (parameter set + one or more CIDRs) ---
 
 @app.route("/clients")
 @login_required
@@ -1242,18 +1286,20 @@ def clients_page():
 @login_required
 def client_new():
     if request.method == "POST":
-        client, errors = validate_client_form(request.form)
+        profile, errors = validate_profile_form(request.form)
+        if not errors and profile_name_taken(load_clients(), profile["name"]):
+            errors.append(f"A profile named {profile['name']!r} already exists.")
         if errors:
             for e in errors:
                 flash(e, "error")
-            return render_template("client_edit.html", client=client, protos=CLIENT_PROTOS)
-        client["id"] = uuid.uuid4().hex[:12]
+            return render_template("client_edit.html", profile=profile, protos=CLIENT_PROTOS)
+        profile["id"] = uuid.uuid4().hex[:12]
         clients = load_clients()
-        clients.append(client)
+        clients.append(profile)
         save_clients(clients)
-        flash(f"Client '{client['name']}' saved. Apply to activate it.", "ok")
+        flash(f"Profile '{profile['name']}' saved. Apply to activate it.", "ok")
         return redirect(url_for("clients_page"))
-    return render_template("client_edit.html", client=None, protos=CLIENT_PROTOS)
+    return render_template("client_edit.html", profile=None, protos=CLIENT_PROTOS)
 
 
 @app.route("/clients/<client_id>/edit", methods=["GET", "POST"])
@@ -1264,18 +1310,20 @@ def client_edit(client_id):
     if existing is None:
         abort(404)
     if request.method == "POST":
-        client, errors = validate_client_form(request.form)
+        profile, errors = validate_profile_form(request.form)
+        if not errors and profile_name_taken(clients, profile["name"], client_id):
+            errors.append(f"A profile named {profile['name']!r} already exists.")
         if errors:
             for e in errors:
                 flash(e, "error")
-            client["id"] = client_id
-            return render_template("client_edit.html", client=client, protos=CLIENT_PROTOS)
-        client["id"] = client_id
-        clients[clients.index(existing)] = client
+            profile["id"] = client_id
+            return render_template("client_edit.html", profile=profile, protos=CLIENT_PROTOS)
+        profile["id"] = client_id
+        clients[clients.index(existing)] = profile
         save_clients(clients)
-        flash(f"Client '{client['name']}' updated. Apply to activate the change.", "ok")
+        flash(f"Profile '{profile['name']}' updated. Apply to activate the change.", "ok")
         return redirect(url_for("clients_page"))
-    return render_template("client_edit.html", client=existing, protos=CLIENT_PROTOS)
+    return render_template("client_edit.html", profile=existing, protos=CLIENT_PROTOS)
 
 
 @app.post("/clients/<client_id>/delete")
@@ -1283,7 +1331,7 @@ def client_edit(client_id):
 def client_delete(client_id):
     clients = [c for c in load_clients() if c["id"] != client_id]
     save_clients(clients)
-    flash("Client deleted. Apply to activate the change.", "ok")
+    flash("Profile deleted. Apply to activate the change.", "ok")
     return redirect(url_for("clients_page"))
 
 
@@ -1295,7 +1343,7 @@ def client_toggle(client_id):
         if c["id"] == client_id:
             c["enabled"] = not c.get("enabled", True)
     save_clients(clients)
-    flash("Client toggled. Apply to activate the change.", "ok")
+    flash("Profile toggled. Apply to activate the change.", "ok")
     return redirect(url_for("clients_page"))
 
 
@@ -1305,9 +1353,10 @@ def clients_apply():
     clients = load_clients()
     user = session.get("user")
     peers = load_peers()
-    if not any(c.get("enabled", True) for c in clients):
-        flash("Refusing to apply: no enabled clients means the server would "
-              "reject every request. Add or enable a client first.", "error")
+    if not any(c.get("enabled", True) and profile_cidrs(c) for c in clients):
+        flash("Refusing to apply: no enabled profile with a CIDR means the "
+              "server would reject every request. Add or enable a profile "
+              "first.", "error")
         return redirect(url_for("clients_page"))
     targets = parse_apply_targets(request.form)
     if targets is None:

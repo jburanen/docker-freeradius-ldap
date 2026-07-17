@@ -13,6 +13,27 @@ rejected.
 **Rejected alternatives:** ...
 ```
 
+## 2026-07-17 — Clients modeled as profiles (params + multiple CIDRs)
+**Decided:** A Clients-tab entry is a "profile": one named parameter set
+(secret, proto, nas_type, msg-auth/proxy-state, extra directives) plus a list
+of CIDRs. Each CIDR renders as its own FreeRADIUS `client{}` block; block
+names are `<profile>` (single CIDR) or `<profile>-<n>` (multiple), all sharing
+`shortname = <profile>` so logs identify the profile, not the CIDR. Profile
+names must be unique (they seed block names; duplicates would be a fatal
+clients.conf parse error). Storage stays clients.json / the `radius-clients`
+volume; legacy single-`ipaddr` entries (≤1.3, incl. the old seed) are migrated
+to `cidrs:[ipaddr]` on load. clients_hash still excludes `id`, so it now keys
+on the cidrs list too. Cluster sync, restart+rollback, and the receiver's
+validate/idempotency all carry over unchanged (validate_clients_payload
+updated for the cidrs shape).
+**Why:** The user administers NAS ranges that share one secret/parameter set
+across several subnets; one profile with N CIDRs beats N near-identical
+clients. FreeRADIUS has no multi-IP client block, so fan-out to N blocks is
+the necessary translation.
+**Rejected alternatives:** one client block with a list of IPs (unsupported in
+3.2); keeping one-CIDR-per-entry and just relabeling (doesn't reduce the
+duplication the user is hitting).
+
 ## 2026-07-17 — RADIUS clients managed in the panel; radiusd restart via PID-1 supervisor
 **Decided:** Clients move out of `$ENV`-driven clients.conf into the panel's
 Clients tab (clients.json in admin-data → rendered clients.conf on the new

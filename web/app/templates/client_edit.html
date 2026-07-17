@@ -2,46 +2,55 @@
 {% block content %}
 
 <div class="card">
-  <h2>{{ 'Edit client' if client and client.get('id') else 'New client' }}</h2>
-  <p class="muted">A RADIUS client is a NAS device (switch, AP, firewall, VPN)
-  allowed to talk to this server. Saving does not change the running server
-  &mdash; press <strong>Apply</strong> on the Clients page, which restarts
-  radiusd (a brief interruption; FreeRADIUS loads clients only on restart).</p>
+  <h2>{{ 'Edit profile' if profile and profile.get('id') else 'New profile' }}</h2>
+  <p class="muted">A profile is a shared parameter set (secret, protocol,
+  options) applied to one or more CIDRs. Each CIDR becomes its own
+  FreeRADIUS <code>client</code> block. Saving does not change the running
+  server &mdash; press <strong>Apply</strong> on the Clients page, which
+  restarts radiusd (a brief interruption; FreeRADIUS loads clients only on
+  restart).</p>
 
   <form method="post">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
 
     <div class="row">
       <div>
-        <label for="name">Client name</label>
-        <input type="text" id="name" name="name" value="{{ client.name if client else '' }}"
-               placeholder="e.g. core-switch-1">
+        <label for="name">Profile name</label>
+        <input type="text" id="name" name="name" value="{{ profile.name if profile else '' }}"
+               placeholder="e.g. campus-switches">
       </div>
       <div>
-        <label for="ipaddr">IP address / CIDR</label>
-        <input type="text" id="ipaddr" name="ipaddr" value="{{ client.ipaddr if client else '' }}"
-               placeholder="e.g. 10.0.0.0/24 or 192.0.2.5">
+        <label for="secret">Shared secret</label>
+        <input type="text" id="secret" name="secret" value="{{ profile.secret if profile else '' }}"
+               placeholder="shared secret configured on the NAS">
       </div>
     </div>
 
-    <div class="row">
-      <div>
-        <label for="secret">Shared secret</label>
-        <input type="text" id="secret" name="secret" value="{{ client.secret if client else '' }}"
-               placeholder="shared secret configured on the NAS">
-      </div>
+    <label style="margin-top:1rem;">IP addresses / CIDRs</label>
+    <table class="attr-table" id="cidrs">
+      {% set cidrs = profile.cidrs if profile else [] %}
+      {% for c in cidrs %}
+      <tr>
+        <td><input type="text" name="cidr" value="{{ c }}" placeholder="e.g. 10.0.0.0/24 or 192.0.2.5"></td>
+        <td style="width:1%;"><button class="btn small danger" type="button" onclick="this.closest('tr').remove()">&times;</button></td>
+      </tr>
+      {% endfor %}
+    </table>
+    <button class="btn small" type="button" onclick="addCidr()">+ Add CIDR</button>
+
+    <div class="row" style="margin-top:1rem;">
       <div>
         <label for="proto">Protocol</label>
         <select id="proto" name="proto">
           {% for p in protos %}
-          <option value="{{ p }}" {% if client and client.proto == p %}selected{% endif %}>{{ p }}</option>
+          <option value="{{ p }}" {% if profile and profile.proto == p %}selected{% endif %}>{{ p }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
         <label for="nas_type">NAS type</label>
         <input type="text" id="nas_type" name="nas_type"
-               value="{{ client.nas_type if client else 'other' }}" placeholder="other">
+               value="{{ profile.nas_type if profile else 'other' }}" placeholder="other">
       </div>
     </div>
 
@@ -50,7 +59,7 @@
         <label for="require_message_authenticator">Require Message-Authenticator
           <span class="muted">(BlastRADIUS / CVE-2024-3596)</span></label>
         <select id="require_message_authenticator" name="require_message_authenticator">
-          {% set ma = client.require_message_authenticator if client else 'yes' %}
+          {% set ma = profile.require_message_authenticator if profile else 'yes' %}
           {% for v in ['yes', 'no', 'auto'] %}
           <option value="{{ v }}" {% if ma == v %}selected{% endif %}>{{ v }}</option>
           {% endfor %}
@@ -59,7 +68,7 @@
       <div>
         <label for="limit_proxy_state">Limit Proxy-State</label>
         <select id="limit_proxy_state" name="limit_proxy_state">
-          {% set lp = client.limit_proxy_state if client else 'auto' %}
+          {% set lp = profile.limit_proxy_state if profile else 'auto' %}
           {% for v in ['yes', 'no', 'auto'] %}
           <option value="{{ v }}" {% if lp == v %}selected{% endif %}>{{ v }}</option>
           {% endfor %}
@@ -70,18 +79,31 @@
     <label for="extra" style="margin-top:1rem;">Additional directives (optional,
       one <code>key = value</code> per line)</label>
     <textarea id="extra" name="extra" rows="3" style="width:100%; font-family:ui-monospace, Consolas, monospace;"
-              placeholder="response_window = 10&#10;max_connections = 16">{{ client.extra if client else '' }}</textarea>
+              placeholder="response_window = 10&#10;max_connections = 16">{{ profile.extra if profile else '' }}</textarea>
 
     <label style="margin-top:1rem;">
-      <input type="checkbox" name="enabled" {% if not client or client.get('enabled', True) %}checked{% endif %}>
+      <input type="checkbox" name="enabled" {% if not profile or profile.get('enabled', True) %}checked{% endif %}>
       Enabled
     </label>
 
     <div style="margin-top:1.4rem;">
-      <button class="btn primary" type="submit">Save client</button>
+      <button class="btn primary" type="submit">Save profile</button>
       <a class="btn" href="{{ url_for('clients_page') }}">Cancel</a>
     </div>
   </form>
 </div>
+
+<script>
+function addCidr(value) {
+  const table = document.getElementById('cidrs');
+  const row = table.insertRow(-1);
+  row.innerHTML =
+    '<td><input type="text" name="cidr" placeholder="e.g. 10.0.0.0/24 or 192.0.2.5"></td>' +
+    '<td style="width:1%;"><button class="btn small danger" type="button" onclick="this.closest(\'tr\').remove()">&times;</button></td>';
+  if (value !== undefined) row.querySelector('input').value = value;
+}
+// start with one empty CIDR row on a fresh profile
+if (document.querySelectorAll('#cidrs tr').length === 0) addCidr();
+</script>
 
 {% endblock %}
