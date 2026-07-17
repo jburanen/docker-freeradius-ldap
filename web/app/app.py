@@ -108,8 +108,8 @@ SYNC_KINDS = {
 # panel logins, applies) via the handler below.
 LOG_DIR = env("RADIUS_LOG_DIR", "/logs")
 LOG_FILES = {
-    "freeradius": {"label": "FreeRADIUS", "path": os.path.join(LOG_DIR, "radius.log")},
-    "auth": {"label": "LDAP / auth", "path": os.path.join(LOG_DIR, "auth.log")},
+    "freeradius": {"label": "FreeRADIUS Daemon", "path": os.path.join(LOG_DIR, "radius.log")},
+    "auth": {"label": "Authentication", "path": os.path.join(LOG_DIR, "auth.log")},
 }
 RADIUS_LOG_MAX_MB = int(env("RADIUS_LOG_MAX_MB", "10"))
 LOG_TAIL_BYTES = 64 * 1024
