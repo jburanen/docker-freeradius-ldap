@@ -13,7 +13,7 @@
         {% else %}<span class="badge off">disabled</span>{% endif %}
       </td>
     </tr>
-    {% if cluster_enabled and node_url %}
+    {% if not cluster_enabled and node_url %}
     <p class="muted">To cluster several deployments of this stack, set in each
       instance's <code>.env</code>: the <strong>same</strong>
       <code>CLUSTER_SECRET</code> on all of them, a friendly
