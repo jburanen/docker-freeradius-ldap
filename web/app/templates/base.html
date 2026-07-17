@@ -102,6 +102,13 @@ input[type=text], input[type=password], select {
   background:var(--field); color:var(--ink); }
 .attr-table input, .attr-table select { width:100%; }
 input.invalid { border-color:var(--err); }
+.cidr-list { display:flex; flex-wrap:wrap; gap:.4rem; margin:.2rem 0 .3rem; }
+.cidr-chip { display:inline-flex; align-items:center; gap:.4rem; background:var(--field);
+  border:1px solid var(--line); border-radius:6px; padding:.18rem .3rem .18rem .55rem;
+  font-family:ui-monospace, Consolas, monospace; font-size:.85rem; }
+.cidr-del { border:none; background:transparent; color:var(--muted); cursor:pointer;
+  font-size:1rem; line-height:1; padding:0 .15rem; }
+.cidr-del:hover { color:var(--err); }
 .log-filter .check-label { margin-right:0; }
 .log-filter input[type=checkbox] { width:auto; }
 .attr-table td { border-bottom:none; padding:.2rem .3rem; }

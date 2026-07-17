@@ -27,16 +27,24 @@
     </div>
 
     <label style="margin-top:1rem;">IP addresses / CIDRs</label>
-    <table class="attr-table" id="cidrs">
-      {% set cidrs = profile.cidrs if profile else [] %}
-      {% for c in cidrs %}
-      <tr>
-        <td><input type="text" name="cidr" value="{{ c }}" placeholder="e.g. 10.0.0.0/24 or 192.0.2.5"></td>
-        <td style="width:1%;"><button class="btn small danger" type="button" onclick="this.closest('tr').remove()">&times;</button></td>
-      </tr>
-      {% endfor %}
-    </table>
-    <button class="btn small" type="button" onclick="addCidr()">+ Add CIDR</button>
+    <p class="muted" style="margin:.1rem 0 .4rem;">Type one or more values
+    separated by spaces and press <strong>Add</strong> (or Enter), or import a
+    file with one address/CIDR per line. Each becomes its own
+    <code>client</code> block.</p>
+    <div style="display:flex; gap:.5rem; align-items:center; margin-bottom:.4rem;">
+      <input type="text" id="cidr_input" autocomplete="off" spellcheck="false"
+             style="flex:1; width:auto;"
+             placeholder="e.g. 10.0.0.0/24 192.0.2.5 2001:db8::/48"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();addCidrsFromInput();}">
+      <button class="btn" type="button" onclick="addCidrsFromInput()">Add</button>
+      <button class="btn" type="button"
+              onclick="document.getElementById('cidr_file').click()">Import file&hellip;</button>
+      <input type="file" id="cidr_file" accept=".txt,.csv,.list,text/plain"
+             style="display:none" onchange="importCidrFile(this)">
+    </div>
+    <p class="muted" id="cidr_error" style="color:var(--err); display:none;"></p>
+    <div class="cidr-list" id="cidrs"></div>
+    <p class="muted" id="cidr_empty">No addresses added yet.</p>
 
     <div class="row" style="margin-top:1rem;">
       <div>
@@ -94,16 +102,93 @@
 </div>
 
 <script>
-function addCidr(value) {
-  const table = document.getElementById('cidrs');
-  const row = table.insertRow(-1);
-  row.innerHTML =
-    '<td><input type="text" name="cidr" placeholder="e.g. 10.0.0.0/24 or 192.0.2.5"></td>' +
-    '<td style="width:1%;"><button class="btn small danger" type="button" onclick="this.closest(\'tr\').remove()">&times;</button></td>';
-  if (value !== undefined) row.querySelector('input').value = value;
+const cidrList = document.getElementById('cidrs');
+const cidrInput = document.getElementById('cidr_input');
+const cidrError = document.getElementById('cidr_error');
+const cidrEmpty = document.getElementById('cidr_empty');
+
+function currentCidrs() {
+  return Array.from(cidrList.querySelectorAll('input[name=cidr]')).map(i => i.value);
 }
-// start with one empty CIDR row on a fresh profile
-if (document.querySelectorAll('#cidrs tr').length === 0) addCidr();
+function updateCidrEmpty() {
+  cidrEmpty.style.display = cidrList.children.length ? 'none' : '';
+}
+
+// Permissive client-side check; the server (ipaddress.ip_network) is the
+// final authority, so we only reject clearly-malformed tokens here.
+function isValidCidr(tok) {
+  let addr = tok, prefix = null;
+  const slash = tok.indexOf('/');
+  if (slash !== -1) {
+    if (tok.indexOf('/', slash + 1) !== -1) return false;  // more than one '/'
+    addr = tok.slice(0, slash);
+    prefix = tok.slice(slash + 1);
+    if (!/^\d{1,3}$/.test(prefix)) return false;
+  }
+  if (addr.includes(':')) {  // IPv6
+    if (!/^[0-9a-fA-F:]+$/.test(addr) || (addr.match(/:/g) || []).length < 2) return false;
+    return prefix === null || +prefix <= 128;
+  }
+  const parts = addr.split('.');  // IPv4
+  if (parts.length !== 4 || !parts.every(p => /^\d{1,3}$/.test(p) && +p <= 255)) return false;
+  return prefix === null || +prefix <= 32;
+}
+
+function addCidrChip(value) {
+  const chip = document.createElement('span');
+  chip.className = 'cidr-chip';
+  const hidden = document.createElement('input');
+  hidden.type = 'hidden'; hidden.name = 'cidr'; hidden.value = value;
+  const text = document.createElement('span');
+  text.className = 'cidr-text'; text.textContent = value;
+  const del = document.createElement('button');
+  del.type = 'button'; del.className = 'cidr-del'; del.innerHTML = '&times;';
+  del.setAttribute('aria-label', 'Remove ' + value);
+  del.onclick = () => { chip.remove(); updateCidrEmpty(); };
+  chip.append(hidden, text, del);
+  cidrList.appendChild(chip);
+}
+
+function addTokens(tokens) {
+  const existing = new Set(currentCidrs());
+  const invalid = [];
+  for (const raw of tokens) {
+    const tok = raw.trim();
+    if (!tok) continue;
+    if (!isValidCidr(tok)) { invalid.push(tok); continue; }
+    if (existing.has(tok)) continue;  // skip duplicates
+    existing.add(tok);
+    addCidrChip(tok);
+  }
+  updateCidrEmpty();
+  if (invalid.length) {
+    cidrError.textContent = 'Ignored invalid entr' + (invalid.length > 1 ? 'ies' : 'y')
+      + ': ' + invalid.join(', ');
+    cidrError.style.display = '';
+  } else {
+    cidrError.style.display = 'none';
+  }
+}
+
+function addCidrsFromInput() {
+  addTokens(cidrInput.value.split(/\s+/));
+  cidrInput.value = '';
+  cidrInput.focus();
+}
+
+function importCidrFile(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => addTokens(reader.result.split(/\s+/));  // handles line- or space-delimited
+  reader.readAsText(file);
+  input.value = '';  // let the same file be re-imported
+}
+
+// Pre-populate the list from the saved profile.
+{% for c in (profile.cidrs if profile else []) %}addCidrChip({{ c | tojson }});
+{% endfor %}
+updateCidrEmpty();
 </script>
 
 {% endblock %}

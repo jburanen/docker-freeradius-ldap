@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.6.2"
+ADMIN_VERSION = "1.7.0"
 
 
 def env(name, default=None, required=False):
@@ -1072,7 +1072,9 @@ def validate_rule_form(form, profile_names=()):
 def validate_profile_form(form):
     errors = []
     name = form.get("name", "").strip()
-    cidrs = [c.strip() for c in form.getlist("cidr") if c.strip()]
+    # Each list entry is one hidden "cidr" field, but split on whitespace too
+    # so a space-delimited paste still works if the browser JS is bypassed.
+    cidrs = [tok for c in form.getlist("cidr") for tok in c.split()]
     secret = form.get("secret", "")
     proto = form.get("proto", "udp").strip()
     nas_type = form.get("nas_type", "").strip()
