@@ -26,24 +26,27 @@
 
 <div class="card">
   <h2>Cluster Instances</h2>
-  <p class="muted">Rules are pushed from the dashboard's Apply box &mdash;
-  select which instances receive the ruleset there. Each instance keeps its
-  own copy; the last apply wins. An apply that cannot reach an instance is
-  queued and retried automatically until it comes back (unless a newer apply
-  reaches it first). Registering one existing member joins the whole cluster
-  (instance lists are merged and shared).</p>
+  <p class="muted">Attribute rules (Rules tab) and RADIUS clients (Clients
+  tab) are each pushed from their own Apply box &mdash; select which instances
+  receive them there. Each instance keeps its own copy; the last apply wins.
+  An apply that cannot reach an instance is queued and retried automatically
+  until it comes back (unless a newer apply reaches it first). Registering one
+  existing member joins the whole cluster (instance lists are merged and
+  shared).</p>
 
   {% if peers %}
   <table>
     <tr>
-      <th style="width:25%;">Instance</th>
+      <th style="width:22%;">Instance</th>
       <th>URL</th>
       <th style="width:5rem;">Version</th>
-      <th style="width:11rem;">Rules</th>
+      <th style="width:9rem;">Rules</th>
+      <th style="width:9rem;">Clients</th>
       <th style="width:1%;"></th>
     </tr>
     {% for p in peers %}
     {% set s = statuses[p.url] %}
+    {% set q = pending.get(p.url, {}) %}
     <tr>
       <td>{{ s.name or p.name }}</td>
       <td>{{ p.url }}</td>
@@ -52,29 +55,46 @@
       {% else %}
       <td>v{{ s.version }}</td>
       {% endif %}
+
+      {# Rules sync #}
       <td>
         {% if not s.error %}
-        {% set applied_info %}Last applied: {{ s.state.applied_at|localtime }}{% if s.state.applied_by %} by {{ s.state.applied_by }}{% endif %}{% endset %}
+        {% set ri %}Last applied: {{ s.state.applied_at|localtime }}{% if s.state.applied_by %} by {{ s.state.applied_by }}{% endif %}{% endset %}
         {% if s.rules_hash == local_hash %}
-        <span class="badge applied" title="{{ applied_info }}">matching</span>
+        <span class="badge applied" title="{{ ri }}">matching</span>
         {% else %}
-        <span class="badge pending" title="{{ applied_info }}">differs</span>
+        <span class="badge pending" title="{{ ri }}">differs</span>
         {% endif %}
         {% endif %}
-        {% if p.url in pending %}
-        <span class="badge pending">apply queued</span>
-        <span class="muted">since {{ pending[p.url].queued_at|localtime }} by
-          {{ pending[p.url].applied_by }}</span>
+        {% if 'rules' in q %}
+        <span class="badge pending" title="queued {{ q.rules.queued_at|localtime }} by {{ q.rules.applied_by }}">queued</span>
         {% endif %}
       </td>
+
+      {# Clients sync #}
+      <td>
+        {% if not s.error %}
+        {% set ci %}Last applied: {{ s.clients_state.applied_at|localtime }}{% if s.clients_state.applied_by %} by {{ s.clients_state.applied_by }}{% endif %}{% endset %}
+        {% if s.clients_hash == local_clients_hash %}
+        <span class="badge applied" title="{{ ci }}">matching</span>
+        {% else %}
+        <span class="badge pending" title="{{ ci }}">differs</span>
+        {% endif %}
+        {% endif %}
+        {% if 'clients' in q %}
+        <span class="badge pending" title="queued {{ q.clients.queued_at|localtime }} by {{ q.clients.applied_by }}">queued</span>
+        {% endif %}
+      </td>
+
       <td style="white-space:nowrap;">
-        {% if p.url in pending %}
+        {% for kind in q %}
         <form class="inline" method="post" action="{{ url_for('cluster_pending_cancel') }}">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <input type="hidden" name="url" value="{{ p.url }}">
-          <button class="btn small" type="submit">Cancel queued</button>
+          <input type="hidden" name="kind" value="{{ kind }}">
+          <button class="btn small" type="submit">Cancel {{ kind }}</button>
         </form>
-        {% endif %}
+        {% endfor %}
         <form class="inline" method="post" action="{{ url_for('cluster_remove') }}"
               onsubmit="return confirm('Remove {{ p.name }} from this instance\'s list?');">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">

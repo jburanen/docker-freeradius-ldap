@@ -76,15 +76,18 @@ custom RADIUS reply attributes.
   `RADIUS_LOG_MAX_MB` (default 10) each. Clustering (optional, enabled by a
   shared `CLUSTER_SECRET`): peers registered by URL on the Cluster page
   (mutual registration + one-hop list propagation = full mesh from one
-  action; peers.json in admin-data), Apply box multi-selects target
-  instances, remote applies POST the full ruleset to
-  `/api/cluster/{status,register,peers,apply}` — JSON signed with
-  HMAC-SHA256 over "ts.body" (±5 min window, CSRF-exempt, stdlib urllib
-  with proxies disabled), receiver validates/saves rules, rewrites
-  authorize, HUPs its own radiusd. Applies to unreachable members queue in
-  pending.json on the origin (newest per peer) and a daemon thread retries
-  every 60 s; every apply carries config_ts so receivers 409 stale queued
-  deliveries superseded by a newer direct apply. A login-gated footer shows
+  action; peers.json in admin-data). **Both** rules and clients sync — each
+  tab's Apply box multi-selects target instances. Remote applies POST the
+  full payload to `/api/cluster/apply` (rules) or `/api/cluster/apply-clients`
+  (clients) — JSON signed with HMAC-SHA256 over "ts.body" (±5 min window,
+  CSRF-exempt, stdlib urllib with proxies disabled); the receiver
+  validates/saves and applies locally (rules HUP, clients restart+rollback;
+  clients apply is idempotent on matching hash to avoid needless restarts on
+  retry). Applies to unreachable members queue in pending.json on the origin,
+  keyed by peer+kind (newest per kind), and a daemon thread retries every
+  60 s; every apply carries config_ts so receivers 409 stale queued
+  deliveries superseded by a newer direct apply. Client peer calls use a
+  longer timeout (radiusd restart). A login-gated footer shows
   `ADMIN_VERSION` and the running FreeRADIUS version, found by regex-scanning
   the radiusd binary / libfreeradius-server.so through `/proc/<pid>` in the
   shared PID namespace (cached per radiusd pid; the compiled-in version
@@ -94,11 +97,9 @@ custom RADIUS reply attributes.
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
   dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x
-  share/dictionary on GitHub). A **Clients** tab manages RADIUS clients
-  (name, IP/CIDR, secret, proto, nas_type, per-client
-  require_message_authenticator / limit_proxy_state, free-form extra
-  directives) → clients.json → `clients.conf`; Apply restarts radiusd with
-  rollback.
+  share/dictionary on GitHub). The **Clients** tab exposes name, IP/CIDR,
+  secret, proto, nas_type, per-client require_message_authenticator /
+  limit_proxy_state, and free-form extra directives.
 
 ## Gotchas / domain notes
 
@@ -142,10 +143,12 @@ custom RADIUS reply attributes.
   cluster API) and only converted for display by the `|localtime` Jinja
   filter. Both containers mount `/etc/localtime:ro` from the (Linux) host so
   rendered stamps and log lines follow the host timezone.
-- Cluster sync is deliberately last-apply-wins full replacement of
-  rules.json — no merging, no conflict detection. Concurrent edits on two
-  panels are resolved by whichever admin applies last. Peer removal is
-  local-only (each instance owns its peers.json).
+- Cluster sync is deliberately last-apply-wins full replacement of both
+  rules.json and clients.json — no merging, no conflict detection. Concurrent
+  edits on two panels are resolved by whichever admin applies last. Peer
+  removal is local-only (each instance owns its peers.json). The pending
+  queue is keyed by peer+kind so a queued rules apply and a queued clients
+  apply for the same offline peer don't clobber each other.
 - tee holds an O_APPEND fd on `/logs/radius.log` and the panel's FileHandler
   one on `/logs/auth.log`, so radius-admin must rotate and clear them with
   in-place `os.truncate` — never `os.replace`, which would leave the writer
@@ -214,5 +217,3 @@ and with `RADIUS_REQUIRED_GROUP` set a non-member rejects.
 - EAP TLS certificate management (currently image snakeoil certs)
 - Manage the RADIUS_REQUIRED_GROUP gate from the admin panel (NAS clients
   are now managed there via the Clients tab)
-- Sync clients (not just rules) across the cluster — currently the Clients
-  tab is per-instance; cluster Apply only pushes attribute rules

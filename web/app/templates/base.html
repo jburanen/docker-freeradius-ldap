@@ -92,8 +92,8 @@ footer .gh-mark { vertical-align:-0.18em; margin-right:.35em; }
   <h1>RADIUS Admin</h1>
   {% if session.user %}
   <nav>
-    <a href="{{ url_for('index') }}">Rules</a>
     <a href="{{ url_for('clients_page') }}">Clients</a>
+    <a href="{{ url_for('index') }}">Attributes</a>
     <a href="{{ url_for('logs', log_name='freeradius') }}">Logs</a>
     <a href="{{ url_for('cluster') }}">Cluster</a>
   </nav>

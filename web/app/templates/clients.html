@@ -67,6 +67,20 @@
       <form method="post" action="{{ url_for('clients_apply') }}"
             onsubmit="return confirm('Apply client changes and restart radiusd now?');">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        {% if peers %}
+        <input type="hidden" name="has_targets" value="1">
+        <h2 style="margin-top:0;">Instances</h2>
+        <div class="targets">
+          <label><input type="checkbox" name="target" value="local" checked>
+            {{ node_name }} <span class="muted">(this instance)</span></label>
+          {% for p in peers %}
+          <label><input type="checkbox" name="target" value="{{ p.url }}" checked>
+            {{ p.name }}</label>
+          {% endfor %}
+        </div>
+        <p class="muted">Each selected instance restarts its own radiusd. An
+        instance that is unreachable is queued and caught up automatically.</p>
+        {% endif %}
         <button class="btn primary" type="submit">Apply &amp; restart</button>
       </form>
     </div>

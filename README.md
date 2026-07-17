@@ -79,8 +79,9 @@ dictionary FreeRADIUS loads.
 ## Clustering (redundant deployments)
 
 Deploy the stack on two or more hosts and join them into a cluster: log in
-to **any** instance's panel and apply the ruleset to all of them — or
-multi-select which instances receive it — in one click.
+to **any** instance's panel and apply the **attribute rules and the RADIUS
+clients** to all of them — or multi-select which instances receive them — in
+one click.
 
 1. In each instance's `.env`, set the **same** `CLUSTER_SECRET`, a friendly
    `CLUSTER_NODE_NAME`, and `CLUSTER_NODE_URL` (that panel's address as the
@@ -88,25 +89,27 @@ multi-select which instances receive it — in one click.
 2. On the new instance's **Cluster** page, register the URL of any existing
    member (or vice versa). Registration is mutual and the member list is
    shared, so one action joins the full mesh.
-3. The dashboard's Apply box then lists every instance with checkboxes
-   (all selected by default).
+3. Both the Rules dashboard and the Clients tab then show their Apply box with
+   a checkbox per instance (all selected by default). Applying clients
+   restarts radiusd on each selected instance.
 
 ![screencap of the cluster status page](images/cluster.png)
 
 Notes: instance-to-instance calls are HMAC-signed with `CLUSTER_SECRET`
-(the secret is never transmitted; clocks must agree within 5 minutes).
-Rules are pushed as a full replacement — the last apply wins. Each instance
-still authenticates panel logins against its own LDAP settings, and the
-Cluster page shows reachability, version, and whether each member's rules
-match the instance you're looking at.
+(the secret is never transmitted; clocks must agree within 5 minutes). Rules
+and clients are each pushed as a full replacement — the last apply wins. Each
+instance still authenticates panel logins against its own LDAP settings, and
+the Cluster page shows reachability, version, and — separately for rules and
+clients — whether each member matches the instance you're looking at.
 
 If a targeted instance is **offline during an apply**, the apply is queued
 on the instance you used and retried every 60 seconds until the member is
-back — it catches up automatically. Every apply carries a timestamp, so a
-queued (older) delivery is discarded if a newer apply already reached the
-member directly. Queued deliveries are shown on the Cluster page, where
-they can also be cancelled. The queue lives on the originating instance:
-if that instance is itself down, delivery resumes when it returns.
+back — it catches up automatically. Rules and clients queue independently per
+member. Every apply carries a timestamp, so a queued (older) delivery is
+discarded if a newer apply already reached the member directly. Queued
+deliveries are shown on the Cluster page, where they can also be cancelled.
+The queue lives on the originating instance: if that instance is itself down,
+delivery resumes when it returns.
 
 ## How it works
 
@@ -205,7 +208,6 @@ CLAUDE.md                     # project context for AI-assisted development
 
 - Manage the group gate from the admin panel (NAS clients are now managed in
   the Clients tab)
-- Sync clients across the cluster (currently the Clients tab is per-instance)
 - Add read-only user group and necessary RBAC
 - Package into simpler form not requiring --build for deployment/refresh
 

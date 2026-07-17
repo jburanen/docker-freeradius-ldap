@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.2.0"
+ADMIN_VERSION = "1.3.1"
 
 
 def env(name, default=None, required=False):
@@ -86,7 +86,19 @@ CLUSTER_SECRET = env("CLUSTER_SECRET", "")
 CLUSTER_NODE_NAME = env("CLUSTER_NODE_NAME", "") or socket.gethostname()
 CLUSTER_NODE_URL = (env("CLUSTER_NODE_URL", "") or "").strip().rstrip("/")
 CLUSTER_TIMEOUT = 6
+# Applying clients restarts radiusd on the receiver (with rollback), which
+# can take tens of seconds -- well past CLUSTER_TIMEOUT -- so peer client
+# applies use their own generous timeout.
+CLIENTS_APPLY_TIMEOUT = 60
 PENDING_RETRY_SECONDS = 60
+
+# Cluster-synced config kinds: which peer endpoint delivers each, and the
+# JSON key its payload travels under. Drives both direct applies and the
+# offline-catch-up retry loop.
+SYNC_KINDS = {
+    "rules": {"endpoint": "/api/cluster/apply", "key": "rules"},
+    "clients": {"endpoint": "/api/cluster/apply-clients", "key": "clients"},
+}
 
 # Log files shown on the Logs page, both on the shared radius-logs volume:
 # radius.log is tee'd from the freeradius container's stdout (see
@@ -395,10 +407,11 @@ def _signal_restart():
     return pid
 
 
-def apply_clients(clients, applied_by):
+def apply_clients(clients, applied_by, config_ts=None):
     """Render clients.conf, restart radiusd, and roll back to the previous
     file if the new one fails to load -- a bad clients.conf must never leave
-    authentication down. Returns (ok, message)."""
+    authentication down. config_ts orders applies across the cluster.
+    Returns (ok, message)."""
     backup = CLIENTS_CONF_PATH + ".prev"
     had_backup = os.path.exists(CLIENTS_CONF_PATH)
     if had_backup:
@@ -420,6 +433,7 @@ def apply_clients(clients, applied_by):
                 "applied_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "applied_by": applied_by,
                 "result": message,
+                "config_ts": config_ts or time.time(),
             })
             return False, message
         rb_ok, rb_msg = _await_radiusd_up(_signal_restart())
@@ -431,6 +445,7 @@ def apply_clients(clients, applied_by):
         "applied_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "applied_by": applied_by,
         "result": message,
+        "config_ts": config_ts or time.time(),
     })
     return ok, message
 
@@ -624,6 +639,43 @@ def validate_rules_payload(rules):
     return None
 
 
+def validate_clients_payload(clients):
+    """Structural check of a pushed client list; returns an error string or
+    None. Mirrors validate_client_form so a peer can't be handed a clients.conf
+    that would crash-loop its radiusd."""
+    if not isinstance(clients, list):
+        return "clients must be a list"
+    if not any(isinstance(c, dict) and c.get("enabled", True) for c in clients):
+        return "at least one enabled client is required"
+    for client in clients:
+        if not isinstance(client, dict):
+            return "client entries must be objects"
+        name = str(client.get("name", ""))
+        if not CLIENT_NAME_RE.fullmatch(name):
+            return f"invalid client name {name!r}"
+        try:
+            ipaddress.ip_network(str(client.get("ipaddr", "")), strict=False)
+        except ValueError:
+            return f"invalid IP/CIDR in client {name!r}"
+        secret = client.get("secret")
+        if not isinstance(secret, str) or not secret or "\n" in secret or "\r" in secret:
+            return f"invalid secret in client {name!r}"
+        if client.get("proto", "udp") not in CLIENT_PROTOS:
+            return f"invalid proto in client {name!r}"
+        if client.get("nas_type") and not NAS_TYPE_RE.fullmatch(str(client["nas_type"])):
+            return f"invalid nas_type in client {name!r}"
+        if client.get("require_message_authenticator", "yes") not in TRISTATE:
+            return f"invalid require_message_authenticator in client {name!r}"
+        if client.get("limit_proxy_state", "auto") not in TRISTATE:
+            return f"invalid limit_proxy_state in client {name!r}"
+        for line in str(client.get("extra", "")).splitlines():
+            if line.strip() and not CLIENT_EXTRA_RE.fullmatch(line.strip()):
+                return f"invalid extra directive in client {name!r}"
+        client.setdefault("id", uuid.uuid4().hex[:12])
+        client["enabled"] = bool(client.get("enabled", True))
+    return None
+
+
 def apply_rules_locally(rules, applied_by, config_ts=None):
     """Write the users file, HUP radiusd, record state. Shared by the local
     Apply path and the cluster API. config_ts is the wall-clock time of the
@@ -641,10 +693,12 @@ def apply_rules_locally(rules, applied_by, config_ts=None):
 
 
 # --- Pending deliveries: applies that targeted an unreachable instance ---
-# Queued on the originating instance (newest ruleset per peer wins) and
-# retried in the background until delivered, so a member that was down
-# catches up automatically. The receiver's config_ts check drops a queued
-# ruleset that has been superseded by a newer apply in the meantime.
+# Queued on the originating instance and retried in the background until
+# delivered, so a member that was down catches up automatically. Keyed by
+# peer URL then kind ("rules" / "clients"), so a queued rules apply and a
+# queued clients apply for the same peer are independent (newest per kind
+# wins). The receiver's config_ts check drops a queued payload superseded by
+# a newer apply in the meantime.
 
 _pending_lock = threading.Lock()
 
@@ -653,24 +707,35 @@ def load_pending():
     return load_json(PENDING_PATH, {"pending": {}})["pending"]
 
 
-def queue_pending(url, rules, applied_by, config_ts):
+def _save_pending(pending):
+    atomic_write(PENDING_PATH, json.dumps({"pending": pending}, indent=2))
+
+
+def queue_pending(kind, url, payload, applied_by, config_ts):
     with _pending_lock:
         pending = load_pending()
-        pending[url] = {
-            "rules": rules,
+        pending.setdefault(url, {})[kind] = {
+            "payload": payload,
             "applied_by": applied_by,
             "config_ts": config_ts,
             "queued_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
-        atomic_write(PENDING_PATH, json.dumps({"pending": pending}, indent=2))
+        _save_pending(pending)
 
 
-def clear_pending(url):
+def clear_pending(url, kind=None):
+    """Drop queued deliveries for a peer -- one kind, or all when kind=None."""
     with _pending_lock:
         pending = load_pending()
-        if url in pending:
+        if url not in pending:
+            return
+        if kind is None or not isinstance(pending[url], dict):
             del pending[url]
-            atomic_write(PENDING_PATH, json.dumps({"pending": pending}, indent=2))
+        else:
+            pending[url].pop(kind, None)
+            if not pending[url]:
+                del pending[url]
+        _save_pending(pending)
 
 
 def pending_retry_loop():
@@ -678,26 +743,37 @@ def pending_retry_loop():
         time.sleep(PENDING_RETRY_SECONDS)
         try:
             peer_urls = {p["url"] for p in load_peers()}
-            for url, entry in list(load_pending().items()):
+            for url, kinds in list(load_pending().items()):
                 if url not in peer_urls:  # peer was removed meanwhile
                     clear_pending(url)
                     continue
-                try:
-                    resp = cluster_call(url, "/api/cluster/apply", {
-                        "rules": entry["rules"],
-                        "applied_by": entry["applied_by"],
-                        "config_ts": entry["config_ts"],
-                    })
-                except ClusterError as exc:
-                    if exc.status in (400, 409):
-                        # Rejected for good: invalid, or superseded by a
-                        # newer apply that already reached the peer.
-                        clear_pending(url)
-                        log.info("dropped queued apply for %s: %s", url, exc)
+                if not isinstance(kinds, dict):
+                    clear_pending(url)  # legacy/malformed entry
                     continue
-                clear_pending(url)
-                log.info("delivered queued apply to %s: %s", url,
-                         resp.get("message"))
+                for kind, entry in list(kinds.items()):
+                    spec = SYNC_KINDS.get(kind)
+                    if not spec or not isinstance(entry, dict) or "payload" not in entry:
+                        clear_pending(url, kind)
+                        continue
+                    timeout = (CLIENTS_APPLY_TIMEOUT if kind == "clients"
+                               else CLUSTER_TIMEOUT)
+                    try:
+                        resp = cluster_call(url, spec["endpoint"], {
+                            spec["key"]: entry["payload"],
+                            "applied_by": entry["applied_by"],
+                            "config_ts": entry["config_ts"],
+                        }, timeout=timeout)
+                    except ClusterError as exc:
+                        if exc.status in (400, 409):
+                            # Rejected for good: invalid, or superseded by a
+                            # newer apply that already reached the peer.
+                            clear_pending(url, kind)
+                            log.info("dropped queued %s apply for %s: %s",
+                                     kind, url, exc)
+                        continue
+                    clear_pending(url, kind)
+                    log.info("delivered queued %s apply to %s: %s",
+                             kind, url, resp.get("message"))
         except Exception:
             log.exception("pending delivery loop error")
 
@@ -1003,6 +1079,46 @@ def flash_vendor_reminders(rule):
         )
 
 
+def parse_apply_targets(form):
+    """Selected apply targets. Without a cluster (no has_targets field) returns
+    ['local']; with the cluster form, returns the checked targets or None when
+    nothing was selected (the caller should flash and redirect)."""
+    if not form.get("has_targets"):
+        return ["local"]
+    return form.getlist("target") or None
+
+
+def push_config_to_peers(kind, payload, peers, targets, config_ts, user):
+    """Push a config payload (rules/clients) to the selected peers, queueing
+    for retry when a peer is unreachable. Flashes a per-peer result."""
+    spec = SYNC_KINDS[kind]
+    timeout = CLIENTS_APPLY_TIMEOUT if kind == "clients" else CLUSTER_TIMEOUT
+    applied_by = f"{user} (via {CLUSTER_NODE_NAME})"
+    for peer in peers:
+        if peer["url"] not in targets:
+            continue
+        try:
+            resp = cluster_call(peer["url"], spec["endpoint"],
+                                {spec["key"]: payload, "applied_by": applied_by,
+                                 "config_ts": config_ts}, timeout=timeout)
+            ok = bool(resp.get("ok"))
+            message = resp.get("message", "no response detail")
+            clear_pending(peer["url"], kind)  # this apply supersedes any queued
+        except ClusterError as exc:
+            if exc.status in (400, 409):  # rejected, retrying won't help
+                ok, message = False, str(exc)
+            else:
+                queue_pending(kind, peer["url"], payload, applied_by, config_ts)
+                log.info("cluster %s apply to %s failed (%s); queued for retry",
+                         kind, peer["url"], exc)
+                flash(f"{peer['name']}: unreachable ({exc}) -- {kind} apply "
+                      f"queued, delivered automatically when the instance is "
+                      f"back (retried every {PENDING_RETRY_SECONDS} s).", "info")
+                continue
+        log.info("cluster %s apply to %s by %s: %s", kind, peer["url"], user, message)
+        flash(f"{peer['name']}: {message}", "ok" if ok else "error")
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -1117,6 +1233,8 @@ def clients_page():
         preview=render_clients_conf(clients),
         state=load_clients_state(),
         pending=clients_pending(clients),
+        peers=load_peers(),
+        node_name=CLUSTER_NODE_NAME,
     )
 
 
@@ -1185,14 +1303,25 @@ def client_toggle(client_id):
 @login_required
 def clients_apply():
     clients = load_clients()
+    user = session.get("user")
+    peers = load_peers()
     if not any(c.get("enabled", True) for c in clients):
         flash("Refusing to apply: no enabled clients means the server would "
               "reject every request. Add or enable a client first.", "error")
         return redirect(url_for("clients_page"))
-    user = session.get("user")
-    ok, message = apply_clients(clients, user)
-    log.info("clients apply by %s: %s", user, message)
-    flash(message, "ok" if ok else "error")
+    targets = parse_apply_targets(request.form)
+    if targets is None:
+        flash("Select at least one instance to apply to.", "error")
+        return redirect(url_for("clients_page"))
+
+    config_ts = time.time()
+    if "local" in targets:
+        ok, message = apply_clients(clients, user, config_ts)
+        log.info("clients apply by %s: %s", user, message)
+        flash(f"{CLUSTER_NODE_NAME}: {message}" if peers else message,
+              "ok" if ok else "error")
+
+    push_config_to_peers("clients", clients, peers, targets, config_ts, user)
     return redirect(url_for("clients_page"))
 
 
@@ -1202,13 +1331,10 @@ def apply():
     rules = load_rules()
     user = session.get("user")
     peers = load_peers()
-    targets = request.form.getlist("target")
-    if request.form.get("has_targets"):
-        if not targets:
-            flash("Select at least one instance to apply to.", "error")
-            return redirect(url_for("index"))
-    else:
-        targets = ["local"]  # no cluster configured: original behavior
+    targets = parse_apply_targets(request.form)
+    if targets is None:
+        flash("Select at least one instance to apply to.", "error")
+        return redirect(url_for("index"))
 
     config_ts = time.time()  # orders this apply across the cluster
     if "local" in targets:
@@ -1218,31 +1344,7 @@ def apply():
         flash(f"{CLUSTER_NODE_NAME}: {message}" if peers else message,
               "ok" if ok else "error")
 
-    applied_by = f"{user} (via {CLUSTER_NODE_NAME})"
-    for peer in peers:
-        if peer["url"] not in targets:
-            continue
-        try:
-            resp = cluster_call(peer["url"], "/api/cluster/apply",
-                                {"rules": rules, "applied_by": applied_by,
-                                 "config_ts": config_ts})
-            ok = bool(resp.get("ok"))
-            message = resp.get("message", "no response detail")
-            clear_pending(peer["url"])  # this apply supersedes anything queued
-        except ClusterError as exc:
-            if exc.status in (400, 409):  # rejected, retrying won't help
-                ok, message = False, str(exc)
-            else:
-                queue_pending(peer["url"], rules, applied_by, config_ts)
-                log.info("cluster apply to %s failed (%s); queued for retry",
-                         peer["url"], exc)
-                flash(f"{peer['name']}: unreachable ({exc}) -- apply queued, "
-                      f"it will be delivered automatically when the instance "
-                      f"is back (retried every {PENDING_RETRY_SECONDS} s).",
-                      "info")
-                continue
-        log.info("cluster apply to %s by %s: %s", peer["url"], user, message)
-        flash(f"{peer['name']}: {message}", "ok" if ok else "error")
+    push_config_to_peers("rules", rules, peers, targets, config_ts, user)
     return redirect(url_for("index"))
 
 
@@ -1265,6 +1367,7 @@ def cluster():
         statuses=statuses,
         pending=load_pending(),
         local_hash=rendered_hash(load_rules()),
+        local_clients_hash=clients_hash(load_clients()),
         node_name=CLUSTER_NODE_NAME,
         node_url=CLUSTER_NODE_URL,
         cluster_enabled=bool(CLUSTER_SECRET),
@@ -1323,9 +1426,10 @@ def cluster_remove():
 @login_required
 def cluster_pending_cancel():
     url = normalize_url(request.form.get("url", ""))
-    clear_pending(url)
-    log.info("cluster: cancelled queued apply for %s by %s",
-             url, session.get("user"))
+    kind = request.form.get("kind") or None
+    clear_pending(url, kind)
+    log.info("cluster: cancelled queued %s apply for %s by %s",
+             kind or "all", url, session.get("user"))
     flash("Queued apply cancelled.", "ok")
     return redirect(url_for("cluster"))
 
@@ -1341,6 +1445,8 @@ def api_cluster_status():
         "version": ADMIN_VERSION,
         "rules_hash": rendered_hash(load_rules()),
         "state": load_state(),
+        "clients_hash": clients_hash(load_clients()),
+        "clients_state": load_clients_state(),
         "peers": load_peers(),
     }
 
@@ -1388,6 +1494,36 @@ def api_cluster_apply():
     applied_by = str(data.get("applied_by") or "cluster peer")
     ok, message = apply_rules_locally(rules, applied_by, incoming_ts or None)
     log.info("cluster apply from %s: %s", applied_by, message)
+    return {"ok": ok, "message": message}
+
+
+@app.post("/api/cluster/apply-clients")
+@cluster_api
+def api_cluster_apply_clients():
+    data = request.get_json(silent=True) or {}
+    clients = data.get("clients")
+    error = validate_clients_payload(clients)
+    if error:
+        log.warning("cluster clients apply rejected: %s", error)
+        return {"ok": False, "message": f"clients rejected: {error}"}, 400
+    try:
+        incoming_ts = float(data.get("config_ts") or 0)
+    except (TypeError, ValueError):
+        incoming_ts = 0
+    cstate = load_clients_state()
+    current_ts = float(cstate.get("config_ts") or 0)
+    if incoming_ts and incoming_ts < current_ts:
+        # A queued (catch-up) delivery superseded by a newer direct apply.
+        return {"ok": False, "message": "stale clients -- a newer apply "
+                                        "already reached this instance"}, 409
+    # Idempotent: if these clients are already applied here, don't restart
+    # radiusd again (retries after a timeout would otherwise churn).
+    if clients_hash(clients) == cstate.get("applied_hash"):
+        return {"ok": True, "message": "already in sync (no restart needed)"}
+    save_clients(clients)
+    applied_by = str(data.get("applied_by") or "cluster peer")
+    ok, message = apply_clients(clients, applied_by, incoming_ts or None)
+    log.info("cluster clients apply from %s: %s", applied_by, message)
     return {"ok": ok, "message": message}
 
 

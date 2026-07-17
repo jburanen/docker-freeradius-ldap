@@ -37,8 +37,26 @@ bad file, locking the admin out of the fix); docker.sock to `restart`
 freeradius (security, already rejected for the rules feature); FreeRADIUS
 dynamic clients (runtime lookup from SQL/file — heavier, changes auth flow);
 leaving clients in `.env` (not the requested granular UI control).
-**Scope note:** Clients are per-instance; cluster Apply still syncs only
-attribute rules. Cross-cluster client sync is on the roadmap.
+**Scope note (superseded 2026-07-17):** clients now sync across the cluster
+too — see the amendment below.
+
+## 2026-07-17 — Clients sync across the cluster (same machinery as rules)
+**Decided:** The Clients tab's Apply gained the same multi-instance targeting
+as rules. Generalized the sync layer over a "kind" (rules|clients): SYNC_KINDS
+maps each to its peer endpoint + payload key; `push_config_to_peers` and the
+pending queue (now keyed peer→kind, newest per kind) are shared. New receiver
+`/api/cluster/apply-clients` validates (validate_clients_payload), 409s stale
+config_ts, is idempotent when the incoming clients hash already matches (skips
+a needless radiusd restart on retries), then save + apply_clients (restart +
+rollback). Peer client calls use CLIENTS_APPLY_TIMEOUT (60s) because the
+receiver restarts radiusd; status endpoint also returns clients_hash /
+clients_state so the Cluster page shows a Clients matching/differs column.
+**Why:** The point of clustering is identical config on every redundant node;
+clients are config too. Reusing the rules machinery kept it small and
+consistent (offline catch-up, ordering, idempotency all come for free).
+**Rejected alternatives:** a second parallel pending file/thread for clients
+(more moving parts); syncing clients silently on every rules apply (clients
+restart radiusd — must be an explicit, separately-targetable action).
 
 ## 2026-07-16 — Clustering: HMAC-signed peer API, full-ruleset push, mesh via one-hop merge
 **Decided:** Multiple deployments cluster through radius-admin itself. Peers
