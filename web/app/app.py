@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("radius-admin")
 
 # Shown in the footer; bump when the panel changes.
-ADMIN_VERSION = "1.4.0"
+ADMIN_VERSION = "1.4.1"
 
 
 def env(name, default=None, required=False):
@@ -1406,10 +1406,16 @@ def cluster():
     statuses = {}
     for peer in peers:
         try:
-            statuses[peer["url"]] = cluster_call(
-                peer["url"], "/api/cluster/status", {}, timeout=4)
+            status = cluster_call(peer["url"], "/api/cluster/status", {}, timeout=4)
+            if not isinstance(status, dict):
+                status = {"error": "unexpected response from peer"}
         except ClusterError as exc:
-            statuses[peer["url"]] = {"error": str(exc)}
+            status = {"error": str(exc)}
+        # Normalize so the template can access nested fields even when a peer
+        # is on an older version (no clients_state) or returned an error.
+        status.setdefault("state", {})
+        status.setdefault("clients_state", {})
+        statuses[peer["url"]] = status
     return render_template(
         "cluster.html",
         peers=peers,

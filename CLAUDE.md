@@ -149,6 +149,11 @@ custom RADIUS reply attributes.
   cluster API) and only converted for display by the `|localtime` Jinja
   filter. Both containers mount `/etc/localtime:ro` from the (Linux) host so
   rendered stamps and log lines follow the host timezone.
+- The /cluster route normalizes each peer's status to a dict with `state`
+  and `clients_state` present before rendering. A peer on an older version
+  omits newer keys (e.g. `clients_state`), and the default Jinja `Undefined`
+  RAISES on nested attribute access (`s.clients_state.applied_at`) → 500. Keep
+  peer-status fields defaulted in the route, not assumed present in templates.
 - Cluster sync is deliberately last-apply-wins full replacement of both
   rules.json and clients.json — no merging, no conflict detection. Concurrent
   edits on two panels are resolved by whichever admin applies last. Peer
