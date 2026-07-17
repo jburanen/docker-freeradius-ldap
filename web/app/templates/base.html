@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RADIUS Admin</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='freeradius.svg') }}">
+<link rel="alternate icon" type="image/png" href="{{ url_for('static', filename='freeradius.png') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='freeradius.png') }}">
 <script>
 /* Apply the theme before first paint; dark is the default. */
 document.documentElement.dataset.theme = localStorage.getItem('theme') || 'dark';
@@ -21,6 +24,8 @@ body { margin:0; font:15px/1.5 system-ui, "Segoe UI", sans-serif; background:var
 header { background:#101826; color:#fff; padding:.7rem 1.2rem; display:flex; align-items:center; gap:1rem;
          border-bottom:1px solid var(--line); }
 header h1 { font-size:1.05rem; margin:0; font-weight:600; }
+header .brand { display:flex; align-items:center; gap:.5rem; }
+header .brand-mark { width:1.5rem; height:1.5rem; flex:0 0 auto; color:#fff; }
 header .spacer { flex:1; }
 header .user { color:#9fb0c3; font-size:.85rem; }
 main { max-width: 62rem; margin:1.5rem auto; padding:0 1rem; }
@@ -111,7 +116,13 @@ footer .gh-mark { vertical-align:-0.18em; margin-right:.35em; }
 </head>
 <body>
 <header>
-  <h1>RADIUS Admin</h1>
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true">
+      <path d="M474.9 361c-21.2 0-39.5-14.4-44.8-34.2 13.5 4.8 27.5 7.7 42.4 7.7 21.2 0 38-16.9 38-38 0-21.2-16.9-38-38-38-25.5 0-47.7-20.7-47.7-46.2v-39.5c0-93.4-75.6-169.5-169.5-169.5-93.4 0-169.5 75.6-169.5 169.5v39.5c0 25.5-22.2 46.2-47.7 46.2-21.2 0-38 16.9-38 38 0 21.2 16.9 38 38 38 16.9 0 32.8-3.4 47.2-9.6C80.4 345.6 62.1 361 40 361c-21.2 0-38 16.9-38 38s16.9 38 38 38c33.2 0 63.6-13.5 85.7-35.2V452c0 21.2 16.9 38 38 38s38-16.9 38-38v-71.3h14.9v90.1c0 21.2 16.9 38 38 38s38-16.9 38-38v-90.1h14.9V452c0 21.2 16.9 38 38 38s38-16.9 38-38v-54.9c22.6 24.6 54.4 39.5 90.1 39.5 21.2 0 38-16.9 38-38 1.3-20.8-16-37.6-36.7-37.6"/>
+      <circle cx="252.4" cy="184.2" r="84.3"/>
+    </svg>
+    <h1>RADIUS Admin</h1>
+  </div>
   {% if session.user %}
   <nav>
     <a href="{{ url_for('clients_page') }}">Clients</a>
