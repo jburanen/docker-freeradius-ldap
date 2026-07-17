@@ -85,8 +85,11 @@ custom RADIUS reply attributes.
   (per-request auth results from linelog, `radius:` prefix, interleaved
   with the panel's own LDAP logins/binds/applies via a root-logger
   FileHandler, `radius-admin:` prefix) from the `radius-logs` volume —
-  3 s auto-refresh, clear button, copytruncate rotation at
-  `RADIUS_LOG_MAX_MB` (default 10) each. Clustering (optional, enabled by a
+  3 s auto-refresh, clear button, and a **client-side line filter**
+  (case-insensitive substring, optional regex, optional invert/"hide
+  matches"; re-applied on every refresh against the full tail held in JS —
+  the `/tail` endpoint still returns unfiltered text), copytruncate rotation
+  at `RADIUS_LOG_MAX_MB` (default 10) each. Clustering (optional, enabled by a
   shared `CLUSTER_SECRET`): peers registered by URL on the Cluster page
   (mutual registration + one-hop list propagation = full mesh from one
   action; peers.json in admin-data). **Both** rules and clients sync — each

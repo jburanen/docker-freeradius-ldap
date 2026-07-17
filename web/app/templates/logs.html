@@ -34,6 +34,16 @@
   the file is rotated once it exceeds {{ max_mb }}&nbsp;MB.</p>
   {% endif %}
 
+  <div class="row log-filter" style="align-items:center; margin:.6rem 0;">
+    <div style="flex:1;">
+      <input type="text" id="filter" autocomplete="off" spellcheck="false"
+             placeholder="Filter lines (case-insensitive substring)">
+    </div>
+    <label class="check-label"><input type="checkbox" id="filter_regex"> Regex</label>
+    <label class="check-label"><input type="checkbox" id="filter_invert"> Hide matches</label>
+    <span class="muted" id="filter_count" style="white-space:nowrap;"></span>
+  </div>
+
   {% if log_text is none %}
   <p class="muted">No log file yet. If the stack was just updated, recreate it
   so both containers use the shared log volume:
@@ -45,19 +55,63 @@
 <script>
 const pre = document.getElementById('log');
 const auto = document.getElementById('autorefresh');
-pre.scrollTop = pre.scrollHeight;  // open at the newest lines
+const filter = document.getElementById('filter');
+const filterRegex = document.getElementById('filter_regex');
+const filterInvert = document.getElementById('filter_invert');
+const filterCount = document.getElementById('filter_count');
+let rawText = pre.textContent;  // unfiltered source, refreshed by the poller
+
+function lineMatcher() {
+  const q = filter.value;
+  if (!q) { filter.classList.remove('invalid'); return null; }  // no filter
+  let test;
+  if (filterRegex.checked) {
+    try {
+      const re = new RegExp(q, 'i');
+      test = (line) => re.test(line);
+    } catch (e) {
+      filter.classList.add('invalid');  // bad regex -> show everything
+      return null;
+    }
+  } else {
+    const needle = q.toLowerCase();
+    test = (line) => line.toLowerCase().includes(needle);
+  }
+  filter.classList.remove('invalid');
+  return filterInvert.checked ? (line) => !test(line) : test;
+}
+
+function render(follow) {
+  const atBottom = follow === undefined
+    ? (pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8)
+    : follow;
+  const match = lineMatcher();
+  const lines = rawText.split('\n');
+  if (match) {
+    const shown = lines.filter(match);
+    pre.textContent = shown.join('\n');
+    filterCount.textContent = shown.length + ' / ' + lines.length + ' lines';
+  } else {
+    pre.textContent = rawText;
+    filterCount.textContent = '';
+  }
+  if (atBottom) pre.scrollTop = pre.scrollHeight;  // follow the newest lines
+}
 
 async function refreshLog() {
   if (!auto.checked || document.hidden) return;
   try {
     const resp = await fetch('{{ url_for("logs_tail", log_name=log_name) }}', {cache: 'no-store'});
     if (!resp.ok) return;  // e.g. session expired
-    const text = await resp.text();
-    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
-    pre.textContent = text;
-    if (atBottom) pre.scrollTop = pre.scrollHeight;  // follow unless scrolled up
+    rawText = await resp.text();
+    render();  // re-apply the current filter, keep follow-unless-scrolled-up
   } catch (e) { /* transient network error; try again next tick */ }
 }
+
+filter.addEventListener('input', () => render(true));
+filterRegex.addEventListener('change', () => render(true));
+filterInvert.addEventListener('change', () => render(true));
+render(true);  // open at the newest lines
 setInterval(refreshLog, 3000);
 </script>
 
