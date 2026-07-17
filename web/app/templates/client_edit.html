@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <h2>{{ 'Edit client' if client and client.get('id') else 'New client' }}</h2>
+  <p class="muted">A RADIUS client is a NAS device (switch, AP, firewall, VPN)
+  allowed to talk to this server. Saving does not change the running server
+  &mdash; press <strong>Apply</strong> on the Clients page, which restarts
+  radiusd (a brief interruption; FreeRADIUS loads clients only on restart).</p>
+
+  <form method="post">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+
+    <div class="row">
+      <div>
+        <label for="name">Client name</label>
+        <input type="text" id="name" name="name" value="{{ client.name if client else '' }}"
+               placeholder="e.g. core-switch-1">
+      </div>
+      <div>
+        <label for="ipaddr">IP address / CIDR</label>
+        <input type="text" id="ipaddr" name="ipaddr" value="{{ client.ipaddr if client else '' }}"
+               placeholder="e.g. 10.0.0.0/24 or 192.0.2.5">
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="secret">Shared secret</label>
+        <input type="text" id="secret" name="secret" value="{{ client.secret if client else '' }}"
+               placeholder="shared secret configured on the NAS">
+      </div>
+      <div>
+        <label for="proto">Protocol</label>
+        <select id="proto" name="proto">
+          {% for p in protos %}
+          <option value="{{ p }}" {% if client and client.proto == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="nas_type">NAS type</label>
+        <input type="text" id="nas_type" name="nas_type"
+               value="{{ client.nas_type if client else 'other' }}" placeholder="other">
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="require_message_authenticator">Require Message-Authenticator
+          <span class="muted">(BlastRADIUS / CVE-2024-3596)</span></label>
+        <select id="require_message_authenticator" name="require_message_authenticator">
+          {% set ma = client.require_message_authenticator if client else 'yes' %}
+          {% for v in ['yes', 'no', 'auto'] %}
+          <option value="{{ v }}" {% if ma == v %}selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="limit_proxy_state">Limit Proxy-State</label>
+        <select id="limit_proxy_state" name="limit_proxy_state">
+          {% set lp = client.limit_proxy_state if client else 'auto' %}
+          {% for v in ['yes', 'no', 'auto'] %}
+          <option value="{{ v }}" {% if lp == v %}selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <label for="extra" style="margin-top:1rem;">Additional directives (optional,
+      one <code>key = value</code> per line)</label>
+    <textarea id="extra" name="extra" rows="3" style="width:100%; font-family:ui-monospace, Consolas, monospace;"
+              placeholder="response_window = 10&#10;max_connections = 16">{{ client.extra if client else '' }}</textarea>
+
+    <label style="margin-top:1rem;">
+      <input type="checkbox" name="enabled" {% if not client or client.get('enabled', True) %}checked{% endif %}>
+      Enabled
+    </label>
+
+    <div style="margin-top:1.4rem;">
+      <button class="btn primary" type="submit">Save client</button>
+      <a class="btn" href="{{ url_for('clients_page') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

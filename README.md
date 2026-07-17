@@ -15,14 +15,16 @@ cp .env.example .env        # point it at your AD/LDAP and set secrets
 docker compose up -d
 ```
 
-Test authentication with a directory account:
+Test authentication with a directory account (the first run seeds a default
+client with the shared secret `testing123`):
 
 ```sh
-docker compose exec freeradius radtest <username> <password> localhost 0 <RADIUS_CLIENT_SECRET>
+docker compose exec freeradius radtest <username> <password> localhost 0 testing123
 ```
 
 Expect `Access-Accept`. From another machine, point `radtest`/your NAS at UDP
-1812 with the shared secret from `RADIUS_CLIENT_SECRET`.
+1812 with that shared secret. Manage clients and their secrets in the panel's
+**Clients** tab (see below) — change the default before exposing the server.
 
 Then open the admin panel at `http://<host>:8080` (port from `ADMIN_PORT`)
 and log in with directory credentials — access requires membership in the
@@ -46,6 +48,15 @@ dictionary FreeRADIUS loads.
 - Saving a rule never touches the running server until you press Apply; the
   dashboard shows a "pending changes" badge and a live preview of the
   generated file.
+- **Clients** (tab) manages the RADIUS clients (NAS devices) that may talk to
+  the server: IP/CIDR, shared secret, protocol, NAS type, per-client
+  BlastRADIUS options (Message-Authenticator / Proxy-State), and any extra
+  `clients.conf` directives. A default client (`0.0.0.0/0`, secret
+  `testing123`) is seeded on first run. Because FreeRADIUS loads clients only
+  at startup, **Apply** on this tab restarts radiusd (a ~1–2 s interruption)
+  rather than hot-reloading; if the new configuration fails to load, the
+  panel rolls back to the previous clients automatically so a typo can't take
+  authentication down.
 
 ![screencap of the rule management page](images/rules.png)
 
@@ -102,8 +113,10 @@ if that instance is itself down, delivery resumes when it returns.
 - **freeradius** runs the official `freeradius/freeradius-server` image.
   Project config files are bind-mounted over the stock ones; FreeRADIUS's
   native `$ENV{...}` expansion pulls every site-specific value (LDAP server,
-  bind credentials, filters, shared secret) from the container environment,
-  which Compose loads from `.env`. Nothing is baked into an image.
+  bind credentials, filters) from the container environment, which Compose
+  loads from `.env`. Nothing is baked into an image. RADIUS clients (NAS
+  devices and their shared secrets) are the exception — they are managed in
+  the panel's Clients tab and written to a shared volume.
 - **Users** are looked up in LDAP/AD; plaintext (PAP) requests authenticate by
   binding to the directory as the user — the standard approach for Active
   Directory, which never exposes password hashes.
@@ -120,7 +133,7 @@ filter with `sAMAccountName`, `memberOf` group membership).
 |------|-----------|
 | Ports | `RADIUS_AUTH_PORT`, `RADIUS_ACCT_PORT`, `ADMIN_PORT` |
 | Server image | `FREERADIUS_IMAGE` (optional override) |
-| RADIUS clients | `RADIUS_CLIENT_IP`, `RADIUS_CLIENT_SECRET` |
+| RADIUS clients | Managed in the panel's **Clients** tab (not `.env`) |
 | Access policy | `RADIUS_REQUIRED_GROUP` |
 | Admin panel | `ADMIN_GROUP`, `ADMIN_SESSION_SECRET`, `RADIUS_LOG_MAX_MB` |
 | Cluster | `CLUSTER_SECRET`, `CLUSTER_NODE_NAME`, `CLUSTER_NODE_URL` |
@@ -180,14 +193,19 @@ CLAUDE.md                     # project context for AI-assisted development
 ## Security
 
 - `.env` holds all secrets and is git-ignored; only `.env.example` (safe
-  placeholders) is committed.
-- Restrict `RADIUS_CLIENT_IP` to your NAS subnet in production.
+  placeholders) is committed. Client shared secrets live in the
+  `admin-data`/`radius-clients` volumes, not `.env`.
+- In the Clients tab, restrict each client's IP/CIDR to your NAS subnet and
+  replace the seeded default client (`0.0.0.0/0`, secret `testing123`) before
+  exposing the server.
 - Use `ldaps://` or `LDAP_START_TLS=yes` plus a least-privilege bind account
   against production directories.
 
 ## Roadmap
 
-- Manage NAS clients and the group gate from the admin panel
+- Manage the group gate from the admin panel (NAS clients are now managed in
+  the Clients tab)
+- Sync clients across the cluster (currently the Clients tab is per-instance)
 - Add read-only user group and necessary RBAC
 - Package into simpler form not requiring --build for deployment/refresh
 

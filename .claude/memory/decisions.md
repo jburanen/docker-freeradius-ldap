@@ -13,6 +13,33 @@ rejected.
 **Rejected alternatives:** ...
 ```
 
+## 2026-07-17 — RADIUS clients managed in the panel; radiusd restart via PID-1 supervisor
+**Decided:** Clients move out of `$ENV`-driven clients.conf into the panel's
+Clients tab (clients.json in admin-data → rendered clients.conf on the new
+`radius-clients` volume, `$-INCLUDE`d by a thin bind-mounted stub). The four
+RADIUS_CLIENT_* env vars are removed; their old values seed a default client
+on first run. Applying clients rewrites the file and RESTARTS radiusd, because
+SIGHUP does not reload clients (verified against v3.2.x `main_config_hup()` —
+only modules/virtual-servers/logfiles reload). To restart radiusd without
+docker.sock and without dropping radius-admin, the freeradius container's
+PID 1 is now a shell supervisor loop; radius-admin SIGTERMs the radiusd child
+and the supervisor relaunches it. apply_clients keeps a `.prev` and rolls
+back if the new file crash-loops radiusd (detected: no radiusd stays up ~2s
+in a 20s window). Because the supervisor (PID 1) never dies, the shared PID
+namespace and radius-admin survive, so a bad clients.conf is recoverable from
+the panel.
+**Why:** User wanted granular per-client config in the UI. Restart is
+unavoidable for clients; the supervisor makes it safe (namespace-preserving)
+and rollback-able.
+**Rejected alternatives:** killing radiusd-as-PID-1 to force a container
+restart (breaks radius-admin's shared PID namespace → both crash-loop on a
+bad file, locking the admin out of the fix); docker.sock to `restart`
+freeradius (security, already rejected for the rules feature); FreeRADIUS
+dynamic clients (runtime lookup from SQL/file — heavier, changes auth flow);
+leaving clients in `.env` (not the requested granular UI control).
+**Scope note:** Clients are per-instance; cluster Apply still syncs only
+attribute rules. Cross-cluster client sync is on the roadmap.
+
 ## 2026-07-16 — Clustering: HMAC-signed peer API, full-ruleset push, mesh via one-hop merge
 **Decided:** Multiple deployments cluster through radius-admin itself. Peers
 live in /data/peers.json (name+URL). Server-to-server calls are JSON POSTs

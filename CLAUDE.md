@@ -11,10 +11,12 @@ custom RADIUS reply attributes.
   never add a Dockerfile for it. The web panel is the one exception: compose
   builds `web/Dockerfile` automatically on first `up`; no manual build
   commands may ever be required.
-- **All site-specific config comes from `.env`.** FreeRADIUS configs use
+- **Most site-specific config comes from `.env`.** FreeRADIUS configs use
   native `$ENV{VAR}` expansion (parsed at startup). Never hardcode
   credentials, hosts, or filters in raddb files; add a variable to
-  `.env.example` instead and document it there.
+  `.env.example` instead and document it there. Exception: RADIUS **clients**
+  (NAS devices) are managed in the panel's Clients tab and rendered into
+  `clients.conf` on a shared volume, not driven by `.env`.
 - Secrets live only in `.env` (git- and claude-ignored). `.env.example`
   carries safe placeholders and is the single source of documentation for
   every variable.
@@ -24,14 +26,20 @@ custom RADIUS reply attributes.
 - `freeradius` service: official `freeradius/freeradius-server:3.2.7-alpine`
   image (overridable via `FREERADIUS_IMAGE`; the default is duplicated in
   radius-admin's environment for the footer fallback — keep in sync),
-  UDP 1812/1813, logs to stdout (`radiusd -f -l stdout` behind a
-  fifo + `tee` that also appends to `/logs/radius.log` on the `radius-logs`
-  volume for the admin panel's log viewer; `exec` keeps radiusd PID 1).
+  UDP 1812/1813. PID 1 is a small `sh` supervisor loop (in the compose
+  `command`) that keeps radiusd running and relaunches it on exit; radiusd's
+  stdout is mirrored to `/logs/radius.log` on the `radius-logs` volume via a
+  fifo + `tee`. The supervisor (not `exec radiusd`) is PID 1 so the shared
+  PID namespace survives a radiusd restart — that is how the panel applies
+  client changes (SIGHUP can't reload clients) without taking radius-admin
+  down. A `trap` forwards SIGTERM so `docker stop` stays clean.
   Alpine variant is required: its libldap links OpenSSL like FreeRADIUS itself,
   while the Ubuntu image mixes GnuTLS/OpenSSL (rlm_ldap warns of TLS
   instability/crashes).
 - Mounted config (repo `freeradius/raddb/` → container `/etc/raddb/`):
-  - `clients.conf` — NAS clients, `$ENV`-driven
+  - `clients.conf` — thin stub; `$-INCLUDE clients-generated/clients.conf`
+    (optional include) pulls the panel-generated client list from the
+    `radius-clients` volume (mounted at `/etc/raddb/clients-generated`)
   - `mods-enabled/ldap` — rlm_ldap; user+group lookup, bind-as-user auth;
     `pool.start = 0` so the server starts even if LDAP is down
   - `mods-enabled/linelog-authlog` — two linelog instances appending one
@@ -50,7 +58,14 @@ custom RADIUS reply attributes.
   volume, which freeradius mounts at `/opt/etc/raddb/mods-config/files`
   (read by the stock `files` module; both sites call `files` in authorize).
   Apply = rewrite file + SIGHUP radiusd via shared PID namespace
-  (`pid: "container:freeradius"`). Login = LDAP bind-as-user with the same
+  (`pid: "container:freeradius"`). A **Clients** tab manages RADIUS clients
+  (clients.json in admin-data → `clients.conf` on the `radius-clients`
+  volume); its Apply rewrites the file and **restarts** radiusd (SIGTERM the
+  radiusd child → supervisor relaunches; SIGHUP does NOT reload clients),
+  keeping a `.prev` backup and rolling back automatically if the new file
+  fails to load (a crash-looping radiusd never stays up ~2s, which is the
+  failure signal). Default client is seeded on first run. Login = LDAP
+  bind-as-user with the same
   `LDAP_*` env vars, gated by `ADMIN_GROUP` membership (memberOf first, then
   member/uniqueMember/memberUid group search). A tabbed "Logs" page tails
   `/logs/radius.log` (raw radiusd, incl. rlm_ldap) and `/logs/auth.log`
@@ -79,7 +94,11 @@ custom RADIUS reply attributes.
   (Cisco-AVPair shell:priv-lvl), Check Point Gaia (CP-Gaia-User-Role,
   CP-Gaia-SuperUser-Access), Brocade ICX (Foundry-Privilege-Level) — all in
   dictionaries FreeRADIUS 3.2 loads by default (verified against v3.2.x
-  share/dictionary on GitHub).
+  share/dictionary on GitHub). A **Clients** tab manages RADIUS clients
+  (name, IP/CIDR, secret, proto, nas_type, per-client
+  require_message_authenticator / limit_proxy_state, free-form extra
+  directives) → clients.json → `clients.conf`; Apply restarts radiusd with
+  rollback.
 
 ## Gotchas / domain notes
 
@@ -102,11 +121,21 @@ custom RADIUS reply attributes.
   `.gitattributes` enforces this. CRLF breaks parsing inside the containers.
 - `chase_referrals = yes` + `rebind = yes` in the ldap module are required
   for multi-DC Active Directory.
-- BlastRADIUS (CVE-2024-3596): clients.conf sets
-  `require_message_authenticator` / `limit_proxy_state` from env
-  (`RADIUS_REQUIRE_MESSAGE_AUTHENTICATOR` default yes). Because there is one
-  catch-all client block, "auto" would let a single patched NAS upgrade the
-  requirement for all devices — that's why the default is explicit.
+- **SIGHUP does NOT reload clients** (verified against v3.2.x
+  `main_config_hup()`: it reloads only modules, virtual servers, and log
+  files). Client changes need a radiusd restart — hence the PID-1 supervisor
+  and the panel's SIGTERM-the-child restart. Rule/users-file changes still
+  use SIGHUP (transactional).
+- A bad `clients.conf` makes radiusd fail to start → the supervisor
+  crash-loops it (throttled 1/s). `apply_clients` detects this (no radiusd
+  stays up ~2s within a 20 s window) and rolls back to `clients.conf.prev`,
+  so a typo can't leave auth down. radius-admin stays up throughout because
+  the supervisor (PID 1) never dies — the admin can still fix it in the panel.
+- BlastRADIUS (CVE-2024-3596): `require_message_authenticator` /
+  `limit_proxy_state` are now **per-client** fields in the Clients tab
+  (default yes / auto on the seeded client). Per-client granularity means a
+  patched NAS can require it without forcing every device, unlike the old
+  single catch-all `$ENV`-driven block.
 - Compose fails fast if `.env` is missing (`env_file` is required) — that's
   intentional, it forces `cp .env.example .env`.
 - Timestamps are stored/exchanged as ISO-8601 UTC (state.json, pending.json,
@@ -134,6 +163,13 @@ custom RADIUS reply attributes.
   mods-config/files on first create — freeradius must be created before
   radius-admin (depends_on guarantees it), or rlm_files would see an empty
   dir and fail.
+- The `radius-clients` volume starts empty, so on the very first `up`
+  freeradius comes up with **zero clients** (the `$-INCLUDE` finds nothing
+  and rejects everything); radius-admin's startup seeds the default client,
+  writes `clients.conf`, and restarts radiusd once to load it. This is why
+  the stub uses `$-INCLUDE` (optional) not `$INCLUDE` — otherwise radiusd
+  would refuse to start on first boot. Subsequent boots read the persisted
+  `clients.conf` directly, no restart.
 
 ## Commands
 
@@ -176,4 +212,7 @@ and with `RADIUS_REQUIRED_GROUP` set a non-member rejects.
 
 - ntlm_auth/winbind option for PEAP-MSCHAPv2 against AD
 - EAP TLS certificate management (currently image snakeoil certs)
-- Manage NAS clients and the RADIUS_REQUIRED_GROUP gate from the admin panel
+- Manage the RADIUS_REQUIRED_GROUP gate from the admin panel (NAS clients
+  are now managed there via the Clients tab)
+- Sync clients (not just rules) across the cluster — currently the Clients
+  tab is per-instance; cluster Apply only pushes attribute rules

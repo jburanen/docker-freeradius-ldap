@@ -6,22 +6,41 @@ services:
     # FREERADIUS_IMAGE default below (footer version fallback).
     image: ${FREERADIUS_IMAGE:-freeradius/freeradius-server:3.2.7-alpine}
     container_name: freeradius
-    # Log to container stdout AND to the shared radius-logs volume (read by
-    # the radius-admin log viewer). tee runs off a fifo so `exec` can keep
-    # radiusd as PID 1 (docker stop signals it directly).
+    # PID 1 is a tiny supervisor that keeps radiusd running. radius-admin
+    # applies CLIENT changes by having the supervisor relaunch radiusd --
+    # FreeRADIUS reloads clients only on a full restart, never on SIGHUP
+    # (rule/users-file changes still use SIGHUP). Keeping the supervisor as
+    # PID 1 means the shared PID namespace survives a radiusd restart, so
+    # radius-admin stays up and can roll back a bad clients.conf. The trap
+    # forwards SIGTERM so `docker stop` is still clean. tee mirrors radiusd
+    # stdout to the shared log volume via a fifo; fd 3 holds the fifo open so
+    # tee does not hit EOF (and exit) each time radiusd restarts. A 1s pause
+    # throttles a crash loop so the panel's health check can see it and roll
+    # back.
     command:
       - sh
       - -c
       - |
         rm -f /tmp/log.pipe && mkfifo /tmp/log.pipe
         tee -a /logs/radius.log < /tmp/log.pipe &
-        exec radiusd -f -l stdout > /tmp/log.pipe 2>&1
+        exec 3<>/tmp/log.pipe
+        stop=0
+        trap 'stop=1; kill "$$rpid" 2>/dev/null' TERM INT
+        while [ "$$stop" = 0 ]; do
+          radiusd -f -l stdout > /tmp/log.pipe 2>&1 &
+          rpid=$$!
+          wait "$$rpid"
+          [ "$$stop" = 0 ] && sleep 1
+        done
     env_file: .env
     ports:
       - "0.0.0.0:${RADIUS_AUTH_PORT:-1812}:1812/udp"
       - "0.0.0.0:${RADIUS_ACCT_PORT:-1813}:1813/udp"
     volumes:
+      # Stub: $-INCLUDEs the generated client list from the shared volume.
       - ./freeradius/raddb/clients.conf:/etc/raddb/clients.conf:ro
+      # Generated clients.conf, written by radius-admin's Clients tab.
+      - radius-clients:/etc/raddb/clients-generated
       - ./freeradius/raddb/mods-enabled/ldap:/etc/raddb/mods-enabled/ldap:ro
       - ./freeradius/raddb/mods-enabled/linelog-authlog:/etc/raddb/mods-enabled/linelog-authlog:ro
       - ./freeradius/raddb/sites-available/default:/etc/raddb/sites-available/default:ro
@@ -55,6 +74,7 @@ services:
       - radius-policy:/radius-files
       - admin-data:/data
       - radius-logs:/logs
+      - radius-clients:/radius-clients
       - /etc/localtime:/etc/localtime:ro
     # Share the freeradius PID namespace so the admin app can SIGHUP radiusd
     # to reload the users file after changes are applied.
@@ -70,3 +90,5 @@ volumes:
   admin-data:
   # radiusd log file (tee'd copy of stdout), shown in the admin panel
   radius-logs:
+  # Generated clients.conf, written by radius-admin, $-INCLUDEd by freeradius
+  radius-clients:

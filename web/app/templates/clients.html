@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card">
+  <div class="row" style="align-items:center;">
+    <div><h2 style="margin:0;">RADIUS clients</h2></div>
+    <div style="flex:0;">
+      <a class="btn primary" href="{{ url_for('client_new') }}">New client</a>
+    </div>
+  </div>
+  <p class="muted">NAS devices (switches, APs, firewalls, VPNs) allowed to send
+  requests to this server, with their shared secrets and per-client options.
+  Saving a client does not change the running server &mdash; press
+  <strong>Apply</strong> below.</p>
+
+  {% if clients %}
+  <table>
+    <tr><th>Name</th><th>IP / CIDR</th><th>Proto</th><th>Msg-Auth</th><th>Status</th><th></th></tr>
+    {% for c in clients %}
+    <tr>
+      <td><a href="{{ url_for('client_edit', client_id=c.id) }}">{{ c.name }}</a></td>
+      <td>{{ c.ipaddr }}</td>
+      <td>{{ c.proto or "udp" }}</td>
+      <td>{{ c.require_message_authenticator or "yes" }}</td>
+      <td>
+        {% if c.get('enabled', True) %}<span class="badge applied">enabled</span>
+        {% else %}<span class="badge off">disabled</span>{% endif %}
+      </td>
+      <td style="white-space:nowrap;">
+        <form class="inline" method="post" action="{{ url_for('client_toggle', client_id=c.id) }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn small" type="submit">{{ 'Disable' if c.get('enabled', True) else 'Enable' }}</button>
+        </form>
+        <form class="inline" method="post" action="{{ url_for('client_delete', client_id=c.id) }}"
+              onsubmit="return confirm('Delete client {{ c.name }}?');">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn small danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No clients defined. With no enabled clients the server
+  rejects every request &mdash; add one.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="apply-layout">
+    <div class="preview-col">
+      <h2>Apply to FreeRADIUS
+        {% if pending %}<span class="badge pending">pending changes</span>
+        {% else %}<span class="badge applied">in sync</span>{% endif %}
+      </h2>
+      <pre class="preview">{{ preview }}</pre>
+      {% if state.applied_at %}
+      <p class="muted">Last applied {{ state.applied_at|localtime }} by {{ state.applied_by }} &mdash; {{ state.result }}</p>
+      {% endif %}
+    </div>
+    <div class="apply-side">
+      <p class="muted">Applying rewrites <code>clients.conf</code> and
+      <strong>restarts radiusd</strong> (unlike rule changes, client changes
+      can't be hot-reloaded). Expect a ~1&ndash;2&nbsp;second interruption. If
+      the new file fails to load, the panel rolls back to the previous
+      clients automatically.</p>
+      <form method="post" action="{{ url_for('clients_apply') }}"
+            onsubmit="return confirm('Apply client changes and restart radiusd now?');">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button class="btn primary" type="submit">Apply &amp; restart</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
